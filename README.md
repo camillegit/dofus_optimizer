@@ -109,5 +109,5 @@ Le tableau suivant liste toutes les caractéristiques supportées ainsi que leur
 | 122                | Dommages d'armes      |
 | 123                | Dommages aux sorts    |
 
-Améliorations prévues : gérer les contraintes d'équipement des objets, ajouter les bonus même quand inutile pour l'objectif (obligatoire d'avoir 2 si on a 3)
+Améliorations prévues : gérer les contraintes d'équipement des objets, ajouter les bonus même quand inutile pour l'objectif (obligatoire d'avoir 2 si on a 3), ajouter les familiers/montures
 
