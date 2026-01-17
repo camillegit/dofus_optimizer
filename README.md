@@ -2,7 +2,7 @@
 
 Ce projet est un outil en ligne de commande permettant de trouver l'ensemble d'équipements optimal pour un personnage Dofus en fonction des statistiques souhaitées.
 
-Article lié : camillegilbert.eu/posts/PanoplieOptimale/
+Pour une explication de la construction du problème d'optimisation vous pouvez consulter l'[article dédié]([https://exemple.com](https://camillegilbert.eu/posts/PanoplieOptimale/)).
 
 ## Installation
 
