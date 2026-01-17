@@ -2,6 +2,8 @@
 
 Ce projet est un outil en ligne de commande permettant de trouver l'ensemble d'équipements optimal pour un personnage Dofus en fonction des statistiques souhaitées.
 
+Article lié : camillegilbert.eu/posts/PanoplieOptimale/
+
 ## Installation
 
 1. Assurez-vous d'avoir Python 3 installé.
@@ -33,7 +35,7 @@ Pour trouver l'ensemble d'équipements optimal, exécutez le script `optimizer.p
 python3 src/optimizer.py --max-level 100 --pa 10 --pm 5 --weights characteristic_10:1.0 characteristic_11:0.5
 ```
 
-Cette commande recherche l'équipement optimal pour un personnage jusqu'au niveau 100 avec 10 PA et 5 PM, en priorisant la Force (`characteristic_10`) et la Vitalité (`characteristic_11`).
+Cette commande recherche l'équipement optimal pour un personnage jusqu'au niveau 100 avec 10 PA et 5 PM, en priorisant la Force (`characteristic_10`) et la Vitalité (`characteristic_11`) avec pondérations respectives.
 
 **Arguments :**
 
