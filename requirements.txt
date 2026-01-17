@@ -1,0 +1,9 @@
+requests
+pandas
+numpy
+pyarrow
+tqdm
+tabulate
+openpyxl
+click
+pulp
