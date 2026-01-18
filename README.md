@@ -20,9 +20,9 @@ pip install -r requirements.txt
 Les fichiers de données nécessaires sont déjà inclus dans le répertoire `data/processed`. Si vous souhaitez les régénérer, vous pouvez exécuter les scripts suivants dans l'ordre :
 
 ```bash
-python3 -m src.items_extract --max-item 50000
-python3 -m src.pano_extract --max-pano 1500
-python3 src/preprocess.py
+python3 -m src.items_extract --max-item 20000
+python3 -m src.pano_extract --max-pano 500
+python3 -m src.preprocess
 ```
 
 ### 2. Lancer l'optimiseur
@@ -112,3 +112,4 @@ Le tableau suivant liste toutes les caractéristiques supportées ainsi que leur
 | 123                | Dommages aux sorts    |
 
 Améliorations prévues : gérer les contraintes d'équipement des objets, ajouter les bonus même quand inutile pour l'objectif (obligatoire d'avoir 2 si on a 3), ajouter les familiers/montures
+
