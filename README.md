@@ -20,8 +20,8 @@ pip install -r requirements.txt
 Les fichiers de données nécessaires sont déjà inclus dans le répertoire `data/processed`. Si vous souhaitez les régénérer, vous pouvez exécuter les scripts suivants dans l'ordre :
 
 ```bash
-python3 -m src.items_extract --max-item 20000
-python3 -m src.pano_extract --max-pano 500
+python3 -m src.items_extract --max-item 50000
+python3 -m src.pano_extract --max-pano 1500
 python3 -m src.preprocess
 ```
 
