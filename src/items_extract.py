@@ -55,3 +55,10 @@ def extract_items(start_id: int = 0, end_id: int = MAX_ITEM):
         df.to_parquet(output_path, index=False)
     print(f"Saved {successful_items_count} items to {output_path}")
 
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max-item", type=int, default=MAX_ITEM)
+    args = parser.parse_args()
+    extract_items(end_id=args.max_item)
