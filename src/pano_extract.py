@@ -52,3 +52,11 @@ def extract_panos(start_id: int = 0, end_id: int = MAX_PANO):
         df = pd.DataFrame(all_panos)
         df.to_parquet(output_path, index=False)
     print(f"Saved {successful_panos_count} panos to {output_path}")
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max-pano", type=int, default=MAX_PANO)
+    args = parser.parse_args()
+    extract_panos(end_id=args.max_pano)
