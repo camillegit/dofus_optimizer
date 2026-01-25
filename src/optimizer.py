@@ -229,20 +229,22 @@ def main():
     code_to_char = dict(zip(table_1, table_2))
 
     c_condition_regex = re.compile(r'\b(C[A-Za-z0-9]*)\s*(<=|>=|=|<|>)\s*([0-9]+)\b')
+    pk_condition_regex = re.compile(r'\b(Pk)\s*(<=|>=|=|<|>)\s*([0-9]+)\b')
 
-    def extract_c_conditions(condition_str):
+    def extract_conditions(condition_str):
         if not isinstance(condition_str, str):
             return []
         normalized = condition_str.replace("|", "&")
-        matches = c_condition_regex.findall(normalized)
-        return [f"{var}{op}{val}" for var, op, val in matches]
+        c_matches = c_condition_regex.findall(normalized)
+        pk_matches = pk_condition_regex.findall(normalized)
+        return [f"{var}{op}{val}" for var, op, val in c_matches + pk_matches]
 
     unique_conditions = set()
     condition_to_items = defaultdict(set)
     for _, row in items_df.iterrows():
         item_id = row['id']
         condition_str = row.get('condition', '')
-        conditions = extract_c_conditions(condition_str)
+        conditions = extract_conditions(condition_str)
         for cond in conditions:
             unique_conditions.add(cond)
             condition_to_items[cond].add(item_id)
@@ -250,7 +252,8 @@ def main():
     unique_conditions = sorted(unique_conditions)
     condition_to_items = {cond: sorted(ids) for cond, ids in condition_to_items.items()}
 
-    cond_regex = re.compile(r'^C([A-Za-z0-9]+)(<=|>=|=|<|>)(\d+)$')
+    stat_cond_regex = re.compile(r'^C([A-Za-z0-9]+)(<=|>=|=|<|>)(\d+)$')
+    pk_cond_regex = re.compile(r'^(Pk)(<=|>=|=|<|>)(\d+)$')
 
     item_stat = {
         char: items_df.set_index('id')[char].to_dict()
@@ -283,34 +286,64 @@ def main():
     z_vars = {cond: LpVariable(f"z_{idx}", cat='Binary') for idx, cond in enumerate(unique_conditions)}
 
     for cond in unique_conditions:
-        match = cond_regex.match(cond)
-        if not match:
-            continue
-        code, op, value_str = match.groups()
-        if code not in code_to_char:
-            continue
-        char = code_to_char[code]
-        if char not in item_stat:
-            continue
-
-        value = int(value_str)
+        stat_match = stat_cond_regex.match(cond)
+        pk_match = pk_cond_regex.match(cond)
         z = z_vars[cond]
-        total = total_stat_expr(char)
-        M = big_m(char)
 
-        if op == '>':
-            rhs = value + 1
-            problem += total >= rhs - M * (1 - z), f"Cond_{cond}_min"
-        elif op == '>=':
-            problem += total >= value - M * (1 - z), f"Cond_{cond}_min"
-        elif op == '<':
-            rhs = value - 1
-            problem += total <= rhs + M * (1 - z), f"Cond_{cond}_max"
-        elif op == '<=':
-            problem += total <= value + M * (1 - z), f"Cond_{cond}_max"
-        elif op == '=':
-            problem += total >= value - M * (1 - z), f"Cond_{cond}_eq_min"
-            problem += total <= value + M * (1 - z), f"Cond_{cond}_eq_max"
+        if stat_match:
+            code, op, value_str = stat_match.groups()
+            if code not in code_to_char:
+                continue
+            char = code_to_char[code]
+            if char not in item_stat:
+                continue
+
+            value = int(value_str)
+            total = total_stat_expr(char)
+            M = big_m(char)
+
+            if op == '>':
+                rhs = value + 1
+                problem += total >= rhs - M * (1 - z), f"Cond_{cond}_min"
+            elif op == '>=':
+                problem += total >= value - M * (1 - z), f"Cond_{cond}_min"
+            elif op == '<':
+                rhs = value - 1
+                problem += total <= rhs + M * (1 - z), f"Cond_{cond}_max"
+            elif op == '<=':
+                problem += total <= value + M * (1 - z), f"Cond_{cond}_max"
+            elif op == '=':
+                problem += total >= value - M * (1 - z), f"Cond_{cond}_eq_min"
+                problem += total <= value + M * (1 - z), f"Cond_{cond}_eq_max"
+
+        elif pk_match:
+            _, op, value_str = pk_match.groups()
+            value = int(value_str)
+
+            def bonuses_ge(threshold):
+                keys = [key for key in bonus_vars if key[1] >= threshold]
+                return lpSum(bonus_vars[key] for key in keys), max(1, len(keys))
+
+            if op == '<':
+                total, M = bonuses_ge(value)
+                problem += total <= 0 + M * (1 - z), f"Cond_{cond}_max"
+            elif op == '<=':
+                total, M = bonuses_ge(value + 1)
+                problem += total <= 0 + M * (1 - z), f"Cond_{cond}_max"
+            elif op == '>':
+                total, M = bonuses_ge(value + 1)
+                problem += total >= 1 - M * (1 - z), f"Cond_{cond}_min"
+            elif op == '>=':
+                total, M = bonuses_ge(value)
+                problem += total >= 1 - M * (1 - z), f"Cond_{cond}_min"
+            elif op == '=':
+                total_lo, M_lo = bonuses_ge(value)
+                total_hi, M_hi = bonuses_ge(value + 1)
+                problem += total_lo >= 1 - M_lo * (1 - z), f"Cond_{cond}_eq_min"
+                problem += total_hi <= 0 + M_hi * (1 - z), f"Cond_{cond}_eq_max"
+
+        else:
+            continue
 
         valid_items = [i for i in condition_to_items.get(cond, []) if i in item_vars]
         if valid_items:
