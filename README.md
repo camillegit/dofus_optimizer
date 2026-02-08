@@ -32,7 +32,7 @@ Pour trouver l'ensemble d'équipements optimal, exécutez le script `optimizer.p
 **Exemple :**
 
 ```bash
-python3 src/optimizer.py --max-level 100 --pa 10 --pm 5 --weights characteristic_10:1.0 characteristic_11:0.5
+python3 src/optimizer.py --max-level 100 --pa 10 --pm 5 --weights characteristic_10:1.0 characteristic_11:0.5 --base-stats characteristic_10:200 characteristic_13:100 --min-stats characteristic_10:100 characteristic_13:300
 ```
 
 Cette commande recherche l'équipement optimal pour un personnage jusqu'au niveau 100 avec 10 PA et 5 PM, en priorisant la Force (`characteristic_10`) et la Vitalité (`characteristic_11`) avec pondérations respectives.
@@ -41,10 +41,12 @@ Cette commande recherche l'équipement optimal pour un personnage jusqu'au nivea
 
 * `--min-level` : Niveau minimum du personnage (par défaut : 1)
 * `--max-level` : Niveau maximum du personnage (par défaut : 200)
-* `--pa` : PA (Points d'Action) souhaités (par défaut : 12)
-* `--pm` : PM (Points de Mouvement) souhaités (par défaut : 6)
+* `--pa` : PA (Points d'Action) souhaités (par défaut : 9)
+* `--pm` : PM (Points de Mouvement) souhaités (par défaut : 4)
 * `--no-dofus` : Exclut les Dofus et les Trophées de l'optimisation
 * `--weights` : Liste des caractéristiques et de leurs poids à optimiser. Par exemple, `characteristic_10:1.0` pour la Force avec un poids de 1.0.
+* `--base-stats` : Stats de base ajoutées au personnage (ex. `characteristic_10:200 characteristic_13:100`). Ces stats sont prises en compte pour les conditions et les totaux affichés.
+* `--min-stats` : Contraintes de stats minimales additionnelles (ex. `characteristic_10:100 characteristic_13:300`). PA/PM sont exclus ici, utilisez `--pa` et `--pm` pour cela.
 
 ## Caractéristiques disponibles
 
@@ -112,4 +114,3 @@ Le tableau suivant liste toutes les caractéristiques supportées ainsi que leur
 | 123                | Dommages aux sorts    |
 
 Améliorations prévues : ajouter les bonus même quand inutile pour l'objectif (obligatoire d'avoir 2 si on a 3), ajouter les familiers/montures
-
