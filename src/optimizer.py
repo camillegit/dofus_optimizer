@@ -1,4 +1,3 @@
-
 import pandas as pd
 from pulp import LpMaximize, LpProblem, LpVariable, lpSum
 import re
@@ -37,6 +36,7 @@ def main():
     parser.add_argument('--weights', nargs='+', default=[], help='List of characteristics and weights (e.g., characteristic_13:1.0)')
     parser.add_argument('--base-stats', nargs='+', default=[], help='Base stats overrides (e.g., characteristic_1:7 characteristic_23:3)')
     parser.add_argument('--debug-pa-pm', action='store_true', help='Print PA/PM contributions (items, set bonuses, base)')
+    parser.add_argument('--min-stats', nargs='+', default=[], help='Minimum stats constraints (e.g., characteristic_10:100 characteristic_13:300)')
     
     args = parser.parse_args()
     
@@ -50,6 +50,8 @@ def main():
     # Filter out banned items
     to_drop = [2155, 8575, 27265, 27266, 27267, 27268, 27278, 27280, 27282, 9031, 2447, 6713] 
     items_df = items_df[~items_df['id'].isin(to_drop)]
+    if args.no_dofus:
+        items_df = items_df[items_df['type'] != 23]
 
     # Step 2: Define ILP variables
     item_vars = {row['id']: LpVariable(f"item_{row['id']}", cat='Binary') for _, row in items_df.iterrows()}
@@ -130,98 +132,74 @@ def main():
                     bonus_characteristics[key] = weighted_sum
     
     # Step 9: Base stats
-    base_stats = {}
-    for raw in args.base_stats:
-        if ':' not in raw:
-            continue
-        key, value = raw.split(':', 1)
-        try:
-            base_stats[key] = float(value)
-        except ValueError:
-            continue
+    def parse_base_stats(raw_list):
+        parsed = {}
+        for raw in raw_list:
+            if ':' in raw:
+                key, value = raw.split(':', 1)
+            elif '=' in raw:
+                key, value = raw.split('=', 1)
+            else:
+                continue
+            key = key.strip()
+            value = value.strip()
+            if not key:
+                continue
+            try:
+                parsed[key] = float(value)
+            except ValueError:
+                continue
+        return parsed
+
+    base_stats = parse_base_stats(args.base_stats)
 
     if 'characteristic_1' not in base_stats:
         base_stats['characteristic_1'] = 7 if args.max_level >= 100 else 6
     if 'characteristic_23' not in base_stats:
         base_stats['characteristic_23'] = 3
 
-    # Step 10: Constraints on minimum PA
-    min_PA_input = args.pa  # Renaming for clarity based on user's request
+    # Step 10: Generic minimum stat constraints (PA/PM + user-provided)
+    def build_min_stat_constraint(problem_obj, char, minimum, label):
+        item_characteristics = {
+            item_id: row[char]
+            for item_id, row in items_df.set_index('id').iterrows()
+        }
 
-    ## PA Bonus of the items
-    item_characteristics_PA = {
-        item_id: row["characteristic_1"]
-        for item_id, row in items_df.set_index('id').iterrows()}
+        bonus_characteristics = {}
+        for set_id in filtered_panos:
+            count = items_df[items_df['pano'] == set_id].shape[0]
+            if count >= 2:
+                for k in range(2, count + 1):
+                    row_bonus = bonuses_df[bonuses_df['id'] == set_id]
+                    if row_bonus.empty:
+                        continue
+                    col_name = f"bonus_{k}_{char}"
+                    if col_name in bonuses_df.columns:
+                        bonus_characteristics[(set_id, k)] = row_bonus[col_name].iloc[0]
 
-    ## PA Bonus of the set
+        problem_obj += (
+            lpSum(
+                item_vars[item_id] * item_characteristics.get(item_id, 0)
+                for item_id in item_vars
+            ) +
+            lpSum(
+                bonus_vars[key] * bonus_characteristics.get(key, 0)
+                for key in bonus_vars
+            ) + base_stats.get(char, 0) >= minimum, label
+        )
 
-    bonus_PA = {}
-    for set_id in filtered_panos :
-        count = items_df[items_df['pano'] == set_id].shape[0]  # Count occurrences
-        if count >= 2:
-            for k in range(2, count + 1):
-                row_PA = bonuses_df[bonuses_df['id'] == set_id]  # Get the row matching set_id
-                if not row_PA.empty:
-                    weighted_sum_PA = 0
+    # Keep --pa and --pm (PA/PM)
+    build_min_stat_constraint(problem, "characteristic_1", args.pa, "Minimum_PA_Constraint")
+    build_min_stat_constraint(problem, "characteristic_23", args.pm, "Minimum_PM_Constraint")
 
-                    column_name = f"bonus_{k}_characteristic_1"
-                    if column_name in bonuses_df.columns:  # Check if the column exists
-                        value = row_PA[column_name].iloc[0]  # Get the value for the characteristic
-                        weighted_sum_PA += value
-
-                        key = (set_id, k)
-                        bonus_PA[key] = weighted_sum_PA
-            
-    problem += (
-        lpSum(
-            # Sum of individual item contributions
-            item_vars[item_id] * item_characteristics_PA.get(item_id, 0)
-            for item_id in item_vars
-        ) +
-        lpSum(
-            # Sum of set bonus contributions
-            bonus_vars[key] * bonus_PA.get(key, 0)
-            for key in bonus_vars
-        ) + base_stats.get('characteristic_1', 0) >= min_PA_input, "Minimum_PA_Constraint")
-    
-    # Step 11: Constraints on minimum PM
-    min_PM_input = args.pm
-
-    ## PM Bonus of the items
-    item_characteristics_PM = {
-        item_id: row["characteristic_23"]
-        for item_id, row in items_df.set_index('id').iterrows()}
-
-    ## PM Bonus of the set
-
-    bonus_PM = {}
-    for set_id in filtered_panos :
-        count = items_df[items_df['pano'] == set_id].shape[0]  # Count occurrences
-        if count >= 2:
-            for k in range(2, count + 1):
-                row_PM = bonuses_df[bonuses_df['id'] == set_id]  # Get the row matching set_id
-                if not row_PM.empty:
-                    weighted_sum_PM = 0
-
-                    column_name = f"bonus_{k}_characteristic_23"
-                    if column_name in bonuses_df.columns:  # Check if the column exists
-                        value = row_PM[column_name].iloc[0]  # Get the value for the characteristic
-                        weighted_sum_PM += value
-
-                        key = (set_id, k)
-                        bonus_PM[key] = weighted_sum_PM
-        
-    problem += (
-        lpSum(
-            # Sum of individual item contributions
-            item_vars[item_id] * item_characteristics_PM.get(item_id, 0)
-            for item_id in item_vars
-        ) +
-        lpSum(
-            # Sum of set bonus contributions
-            bonus_vars[key] * bonus_PM.get(key, 0)
-            for key in bonus_vars
-        ) + base_stats.get('characteristic_23', 0) >= min_PM_input, "Minimum_PM_Constraint")
+    # Additional minimum stats (exclude PA/PM)
+    min_stats = parse_base_stats(args.min_stats)
+    for char, minimum in min_stats.items():
+        if char in ("characteristic_1", "characteristic_23"):
+            continue
+        if char not in items_df.columns:
+            continue
+        build_min_stat_constraint(problem, char, minimum, f"Minimum_{char}_Constraint")
     
     # Step 12: Condition parsing and constraints
     table_1 = ['W', 'S', 'C', 'A', 'I', 'P', 'M', 'V']
@@ -382,9 +360,11 @@ def main():
         122: "Dommages d'armes", 123: "Dommages aux sorts"
     }
 
-    # Define stats to always display, plus the ones from the weights
+    # Define stats to always display, plus the ones from the weights and base stats
     stats_to_display = set(['characteristic_1', 'characteristic_23', 'characteristic_19'])
     for char in characteristics_of_interest:
+        stats_to_display.add(char)
+    for char in base_stats.keys():
         stats_to_display.add(char)
 
     total_stats = {stat: 0 for stat in stats_to_display}
@@ -420,8 +400,8 @@ def main():
     
     print("\nStats totales:")
     # Add base stats
-    total_stats['characteristic_1'] += base_stats.get('characteristic_1', 0)
-    total_stats['characteristic_23'] += base_stats.get('characteristic_23', 0)
+    for char, value in base_stats.items():
+        total_stats[char] = total_stats.get(char, 0) + value
     
     for char, value in total_stats.items():
         char_id = int(char.split('_')[1])
