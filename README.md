@@ -6,12 +6,16 @@ Pour une explication de la construction du problème d'optimisation vous pouvez 
 
 ## Installation
 
-1. Assurez-vous d'avoir Python 3 installé.
-2. Installez les dépendances requises avec pip :
+1. Assurez-vous d'avoir Python 3.10 ou plus récent.
+2. Créez un environnement virtuel et installez-y les dépendances :
 
 ```bash
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
+
+Toutes les commandes ci-dessous supposent l'environnement activé (`source venv/bin/activate`), ou s'utilisent avec `venv/bin/python` à la place de `python3`.
 
 ## Utilisation
 
