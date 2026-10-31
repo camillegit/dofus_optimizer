@@ -1,0 +1,577 @@
+/* Forge de Builds — inspired by the wood, parchment and amber of the Dofus interface */
+:root {
+  --night: #17130d;
+  --bark: #2a2117;
+  --wood: #45372a;
+  --wood-light: #6e5a40;
+  --brass: #b98f4e;
+  --amber: #f0a43a;
+  --amber-deep: #c66b12;
+  --parchment: #eadcb6;
+  --parchment-dark: #d6c194;
+  --ink: #33240f;
+  --ink-soft: #6b5434;
+  --slot: #2f281e;
+  --terre: #a77b3e;
+  --feu: #e2592e;
+  --eau: #3c8fd8;
+  --air: #5aa83c;
+  --neutre: #8e8a82;
+  --multi: #b06bd0;
+  --pa: #3f9be8;
+  --ok: #7cc254;
+  --warn: #e8b13e;
+  --radius: 6px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--parchment);
+  font: 15px/1.45 "Alegreya Sans", "Trebuchet MS", sans-serif;
+  background-color: var(--night);
+  background-image:
+    radial-gradient(ellipse at 20% -10%, rgba(240, 164, 58, .14), transparent 55%),
+    radial-gradient(ellipse at 90% 110%, rgba(90, 168, 60, .08), transparent 50%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, .012) 0 2px, transparent 2px 7px);
+  min-height: 100vh;
+  padding: 0 16px 24px;
+}
+
+h1, h2, h3, legend, .forge-button, .seal span, .ladder button {
+  font-family: "Alegreya SC", Georgia, serif;
+}
+
+/* ---------- Banner ---------- */
+.banner {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 22px 4px 14px;
+  border-bottom: 1px solid rgba(185, 143, 78, .35);
+}
+.banner h1 {
+  margin: 0;
+  font-size: clamp(30px, 4vw, 46px);
+  font-weight: 800;
+  letter-spacing: .02em;
+  color: var(--amber);
+  text-shadow: 0 2px 0 #5a3108, 0 0 24px rgba(240, 164, 58, .25);
+}
+.banner-kicker {
+  display: block;
+  font: 600 12px/1 "Alegreya Sans", sans-serif;
+  letter-spacing: .3em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+.banner-hint { margin: 0; max-width: 460px; color: #cdb98f; }
+
+/* ---------- Frames ---------- */
+.frame {
+  position: relative;
+  background: linear-gradient(180deg, #3b2f22, #2c2319);
+  border: 2px solid #1c150d;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 2px var(--wood-light),
+    inset 0 0 0 4px #2b2117,
+    inset 0 2px 14px rgba(0, 0, 0, .5),
+    0 8px 24px rgba(0, 0, 0, .45);
+  padding: 18px;
+}
+.frame::before, .frame::after {        /* brass rivets */
+  content: "";
+  position: absolute;
+  top: 7px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #f2d593, #8a6328 70%);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, .6);
+}
+.frame::before { left: 7px; }
+.frame::after { right: 7px; }
+
+.parchment {
+  color: var(--ink);
+  background:
+    radial-gradient(ellipse at center, transparent 55%, rgba(120, 82, 30, .22) 100%),
+    linear-gradient(175deg, #f1e5c3, var(--parchment) 40%, var(--parchment-dark));
+}
+.frame.parchment { box-shadow: inset 0 0 0 2px #a8875a, inset 0 0 0 4px #f5ead0, 0 8px 24px rgba(0, 0, 0, .45); }
+
+.frame-inner {
+  border-radius: var(--radius);
+  border: 1px solid #120d07;
+  box-shadow: inset 0 0 0 1px rgba(185, 143, 78, .35);
+}
+
+.ornate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--amber);
+}
+.parchment .ornate { color: #7a3f0b; }
+.ornate::before, .ornate::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, currentColor 30%, currentColor 70%, transparent);
+  opacity: .55;
+}
+.ornate.small { font-size: 16px; margin-bottom: 10px; }
+.ornate.light { color: var(--brass); }
+
+/* ---------- Classes ---------- */
+.breeds { max-width: 1320px; margin: 18px auto; }
+.breed-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 8px;
+}
+.breed {
+  appearance: none;
+  border: 0;
+  padding: 4px 0 2px;
+  background: none;
+  color: #cdb98f;
+  cursor: pointer;
+  font: 500 12px/1.2 "Alegreya Sans", sans-serif;
+  text-align: center;
+  border-radius: var(--radius);
+  transition: transform .15s, color .15s;
+}
+.breed img {
+  display: block;
+  width: 48px; height: 48px;
+  margin: 0 auto 4px;
+  object-fit: contain;
+  filter: grayscale(.75) brightness(.8) drop-shadow(0 2px 2px rgba(0, 0, 0, .6));
+  transition: filter .15s;
+}
+.breed:hover img, .breed:focus-visible img { filter: grayscale(0) brightness(1) drop-shadow(0 2px 2px rgba(0, 0, 0, .6)); }
+.breed:focus-visible { outline: 2px solid var(--amber); }
+.breed[aria-checked="true"] { color: var(--amber); transform: translateY(-2px); }
+.breed[aria-checked="true"] img {
+  filter: grayscale(0) brightness(1.08) drop-shadow(0 0 8px rgba(240, 164, 58, .75));
+}
+
+/* ---------- Layout ---------- */
+.layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 18px;
+  max-width: 1320px;
+  margin: 0 auto;
+  align-items: start;
+}
+
+/* ---------- Settings ---------- */
+.settings { display: flex; flex-direction: column; gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.field > span, legend { font-weight: 700; color: var(--ink-soft); font-size: 14px; }
+legend { padding: 0; margin-bottom: 6px; font-size: 15px; color: #7a3f0b; }
+.field-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.field.inline { flex-direction: row; align-items: center; gap: 6px; }
+.note { color: var(--ink-soft); font-size: 12.5px; }
+output { color: #7a3f0b; font-weight: 700; }
+
+input[type="number"] {
+  width: 70px;
+  padding: 5px 6px;
+  border: 1px solid #8f7246;
+  border-radius: 4px;
+  background: #f8f0dc;
+  color: var(--ink);
+  font: 600 15px "Alegreya Sans", sans-serif;
+  box-shadow: inset 0 1px 3px rgba(80, 50, 10, .25);
+}
+input[type="range"] { width: 100%; accent-color: var(--amber-deep); }
+input:focus-visible { outline: 2px solid var(--amber-deep); outline-offset: 1px; }
+
+.orbs, .toggles, .seals { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.orb, .rune, .seal, .check { position: relative; cursor: pointer; }
+.orb input, .rune input, .seal input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.orb span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 4px;
+  border-radius: 999px;
+  border: 1px solid #a08259;
+  background: #f6ecd2;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.orb span::before {
+  content: "";
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff8 0 15%, var(--c) 45%, #0006 100%);
+  box-shadow: 0 0 0 1px #0004;
+}
+.orb[data-el="terre"] { --c: var(--terre); }
+.orb[data-el="feu"] { --c: var(--feu); }
+.orb[data-el="eau"] { --c: var(--eau); }
+.orb[data-el="air"] { --c: var(--air); }
+.orb[data-el="multi"] { --c: var(--multi); }
+.orb input:checked + span { background: var(--c); color: #fff; border-color: #0005; text-shadow: 0 1px 1px #0007; }
+.orb input:focus-visible + span, .rune input:focus-visible + span, .seal input:focus-visible + span { outline: 2px solid var(--amber-deep); outline-offset: 2px; }
+
+.rune span {
+  position: relative;
+  z-index: 0;
+  display: inline-grid;
+  place-items: center;
+  width: 46px; height: 46px;
+  color: #e3d2aa;
+  font-weight: 800;
+  font-size: 13px;
+  text-shadow: 0 1px 1px #0008;
+}
+.rune span::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  z-index: -1;
+  transform: rotate(45deg);
+  border-radius: 6px;
+  background: linear-gradient(135deg, #5d4d38, #3a2f22);
+  border: 1px solid #1c150d;
+  box-shadow: inset 0 0 0 1px #8a7350;
+}
+.rune input:checked + span { color: #3b1d00; text-shadow: none; }
+.rune input:checked + span::before {
+  background: radial-gradient(circle, #ffd27a, var(--amber-deep));
+  box-shadow: 0 0 10px rgba(240, 164, 58, .7), inset 0 0 0 1px #fff6;
+}
+
+.seal span {
+  display: inline-block;
+  padding: 5px 12px;
+  border-radius: 4px;
+  border: 1px solid #a08259;
+  background: #f6ecd2;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.seal input:checked + span {
+  background: linear-gradient(180deg, #9a2b1c, #6d1a10);
+  border-color: #3f0d06;
+  color: #fbe6c4;
+  box-shadow: inset 0 1px 0 #ffffff30, 0 2px 4px rgba(60, 10, 0, .4);
+}
+.check { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; color: var(--ink-soft); }
+.check input { accent-color: var(--amber-deep); width: 16px; height: 16px; }
+
+.forge-button {
+  margin-top: 4px;
+  padding: 12px 18px;
+  font-size: 20px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: .03em;
+  text-shadow: 0 1px 0 #6d3500, 0 0 6px #0005;
+  border: 2px solid #4a2604;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffc35e 0%, var(--amber) 35%, var(--amber-deep) 100%);
+  box-shadow: inset 0 2px 0 #fff6, inset 0 -3px 0 #8a4305, 0 4px 10px rgba(80, 40, 0, .45);
+  cursor: pointer;
+  transition: filter .15s, transform .1s;
+}
+.forge-button:hover { filter: brightness(1.08); }
+.forge-button:active { transform: translateY(1px); }
+.forge-button:disabled { filter: grayscale(.7) brightness(.85); cursor: wait; }
+.forge-button:focus-visible { outline: 3px solid #fff2c4; outline-offset: 2px; }
+.status { margin: 0; min-height: 1.4em; font-size: 13.5px; color: #7a3f0b; }
+.status.error { color: #a01d10; font-weight: 700; }
+
+/* ---------- Board ---------- */
+.board { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+.ladder { display: flex; flex-wrap: wrap; gap: 8px; min-height: 46px; }
+.ladder:empty::before {
+  content: "Aucun build forgé pour l'instant.";
+  color: #a99470;
+  font-style: italic;
+  align-self: center;
+}
+.ladder button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 112px;
+  padding: 6px 14px 6px 12px;
+  border: 1px solid #120d07;
+  border-left: 6px solid var(--c, var(--multi));
+  border-radius: 4px;
+  background: linear-gradient(180deg, #4a3c2c, #33291e);
+  color: #e9d8b0;
+  cursor: pointer;
+  text-align: left;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 10px) 50%, 100% 100%, 0 100%);
+}
+.ladder button small { font: 500 11.5px "Alegreya Sans", sans-serif; color: #b6a27c; letter-spacing: .08em; text-transform: uppercase; }
+.ladder button strong { font-size: 19px; color: #fff3d6; }
+.ladder button[aria-pressed="true"] { background: linear-gradient(180deg, #6a5235, #4a3a28); box-shadow: inset 0 0 0 1px var(--c, var(--multi)); }
+.ladder button:focus-visible { outline: 2px solid var(--amber); }
+
+.board-grid { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 14px; align-items: start; }
+.board-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* Inventory */
+.inventory {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: 1fr auto;
+  gap: 12px;
+  padding: 16px;
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(240, 164, 58, .16), transparent 60%),
+    linear-gradient(180deg, #2d251b, #211b13);
+  min-height: 420px;
+}
+.slots { display: flex; gap: 10px; }
+.col-left, .col-right { flex-direction: column; justify-content: center; }
+.row-bottom { grid-column: 1 / -1; justify-content: center; flex-wrap: wrap; align-items: center; }
+.row-sep { width: 1px; height: 46px; background: linear-gradient(transparent, var(--brass), transparent); margin: 0 4px; }
+
+.slot {
+  position: relative;
+  width: 64px; height: 64px;
+  border-radius: 8px;
+  background: radial-gradient(circle at 50% 40%, #3e3427, var(--slot));
+  border: 1px solid #0e0a05;
+  box-shadow: inset 0 0 0 1px #6d5a3c, inset 0 4px 10px rgba(0, 0, 0, .6);
+  display: grid;
+  place-items: center;
+}
+.slot.dofus { width: 52px; height: 52px; border-radius: 50%; }
+.slot::after {
+  content: attr(data-label);
+  position: absolute;
+  font: 600 10px/1 "Alegreya Sans", sans-serif;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #7f6b4b;
+}
+.slot.filled::after { content: none; }
+.slot img { width: 84%; height: 84%; object-fit: contain; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .7)); }
+.slot.filled { cursor: help; box-shadow: inset 0 0 0 1px var(--brass), inset 0 4px 10px rgba(0, 0, 0, .5); }
+.slot.filled:focus-visible { outline: 2px solid var(--amber); }
+.slot .badge {
+  position: absolute;
+  right: -5px; bottom: -5px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 40% 30%, #ffe08f, var(--amber-deep));
+  color: #3b1d00;
+  font: 800 10.5px "Alegreya Sans", sans-serif;
+  border: 1px solid #4a2604;
+}
+.slot .warn {
+  position: absolute;
+  left: -4px; top: -4px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--warn);
+  color: #3b2400;
+  font: 800 11px/16px "Alegreya Sans", sans-serif;
+  text-align: center;
+  border: 1px solid #5a3a00;
+}
+
+.avatar { position: relative; display: grid; place-items: center; min-height: 300px; }
+.avatar img {
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  filter: brightness(1.9) saturate(1.2) drop-shadow(0 10px 18px rgba(0, 0, 0, .7));
+}
+.medallion {
+  position: absolute;
+  bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 22px 9px;
+  border-radius: 40px / 28px;
+  background: radial-gradient(ellipse at 50% 20%, #5e472b, #2d2216);
+  border: 2px solid #120d07;
+  box-shadow: inset 0 0 0 2px var(--brass), 0 6px 16px rgba(0, 0, 0, .6);
+}
+.medallion-label { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: #cdb98f; }
+.medallion strong { font: 800 30px/1.1 "Alegreya SC", serif; color: var(--amber); text-shadow: 0 2px 0 #4a2604; }
+.medallion-sub { font-size: 12px; color: #b6a27c; }
+
+.forging {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 14px;
+  background: rgba(16, 12, 7, .82);
+  border-radius: var(--radius);
+  color: #e9d8b0;
+  font-family: "Alegreya SC", serif;
+  font-size: 18px;
+  z-index: 2;
+}
+.forging[hidden] { display: none; }
+.forging p { margin: 0; }
+.rune-spin {
+  width: 70px; height: 70px;
+  border-radius: 12px;
+  transform: rotate(45deg);
+  background: radial-gradient(circle, #ffd27a, var(--amber-deep) 60%, #6d3500);
+  box-shadow: 0 0 26px rgba(240, 164, 58, .8);
+  animation: forge 1.6s ease-in-out infinite;
+}
+@keyframes forge {
+  0%, 100% { transform: rotate(45deg) scale(.9); box-shadow: 0 0 12px rgba(240, 164, 58, .5); }
+  50% { transform: rotate(225deg) scale(1.05); box-shadow: 0 0 34px rgba(240, 164, 58, .95); }
+}
+@media (prefers-reduced-motion: reduce) { .rune-spin { animation: none; } }
+
+/* Character sheet */
+.sheet { padding: 14px 14px 12px; }
+.stats { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; font-size: 14px; }
+.stats dt { color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+.stats dt::before {
+  content: "";
+  width: 8px; height: 8px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  background: var(--c, #9b8158);
+}
+.stats dd { margin: 0; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stats .group {
+  grid-column: 1 / -1;
+  margin: 8px 0 2px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid #b89a6b;
+  font: 700 12px "Alegreya SC", serif;
+  letter-spacing: .08em;
+  color: #7a3f0b;
+}
+.stats .group:first-child { margin-top: 0; }
+.extras { margin-top: 10px; font-size: 13px; color: var(--ink-soft); }
+.extras p { margin: 4px 0; }
+.extras strong { color: var(--ink); }
+
+/* Spell bar */
+.spellbar-wrap {
+  padding: 12px 14px 14px;
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #2a2219, #1c1610);
+  border: 1px solid #0e0a05;
+  box-shadow: inset 0 0 0 1px rgba(185, 143, 78, .4);
+}
+.spellbar { list-style: none; margin: 0; padding: 0; display: flex; gap: 12px; flex-wrap: wrap; }
+.spellbar:empty::before { content: "Les sorts de la classe apparaîtront ici."; color: #8f7d5d; font-style: italic; }
+.spell {
+  position: relative;
+  width: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: help;
+  border-radius: 6px;
+}
+.spell:focus-visible { outline: 2px solid var(--amber); }
+.spell .icon {
+  position: relative;
+  width: 56px; height: 56px;
+  border-radius: 8px;
+  border: 1px solid #0e0a05;
+  box-shadow: inset 0 0 0 1px #6d5a3c;
+  background: var(--slot);
+  overflow: visible;
+}
+.spell .icon img { width: 100%; height: 100%; border-radius: 7px; display: block; }
+.spell.unused .icon img { filter: grayscale(.85) brightness(.6); }
+.spell.used .icon { box-shadow: 0 0 0 2px var(--amber), 0 0 12px rgba(240, 164, 58, .55); }
+.spell .pa {
+  position: absolute;
+  right: -7px; bottom: -7px;
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+  background: var(--pa);
+  color: #fff;
+  font: 800 11px "Alegreya Sans", sans-serif;
+  text-shadow: 0 1px 1px #0008;
+}
+.spell .casts {
+  position: absolute;
+  left: -6px; top: -6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--amber);
+  color: #3b1d00;
+  font: 800 11.5px/18px "Alegreya Sans", sans-serif;
+  border: 1px solid #4a2604;
+}
+.spell .dmg { font: 700 14px "Alegreya Sans", sans-serif; color: #f3e3bd; font-variant-numeric: tabular-nums; }
+.spell .name { font-size: 11.5px; line-height: 1.15; color: #b6a27c; text-align: center; min-height: 2.3em; }
+.el-line { display: flex; gap: 3px; }
+.el-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+
+/* Tooltip (Dofus-style dark card) */
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  max-width: 300px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(22, 17, 11, .96);
+  border: 1px solid var(--brass);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .6);
+  color: #e9d8b0;
+  font-size: 13.5px;
+  pointer-events: none;
+}
+.tooltip h4 { margin: 0 0 4px; font: 700 15px "Alegreya SC", serif; color: var(--amber); }
+.tooltip .sub { color: #a99470; font-size: 12px; margin-bottom: 6px; }
+.tooltip .line { display: flex; justify-content: space-between; gap: 14px; }
+.tooltip .line b { color: #fff3d6; font-variant-numeric: tabular-nums; }
+.tooltip .crit b { color: #ffb347; }
+.tooltip .warn { color: var(--warn); margin-top: 6px; }
+.tooltip .exo { color: #8fd3ff; }
+
+.credits { max-width: 1320px; margin: 20px auto 0; color: #7f6b4b; font-size: 12.5px; text-align: center; }
+
+[data-el="terre"], .c-terre { --c: var(--terre); }
+[data-el="feu"], .c-feu { --c: var(--feu); }
+[data-el="eau"], .c-eau { --c: var(--eau); }
+[data-el="air"], .c-air { --c: var(--air); }
+[data-el="neutre"], .c-neutre { --c: var(--neutre); }
+[data-el="multi"], .c-multi { --c: var(--multi); }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: 1fr; }
+  .board-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .inventory { grid-template-columns: 1fr; padding: 12px 8px; }
+  .col-left, .col-right { flex-direction: row; justify-content: center; flex-wrap: wrap; }
+  .avatar { order: -1; min-height: 220px; }
+  .slot { width: 54px; height: 54px; }
+  .slot.dofus { width: 44px; height: 44px; }
+  .spell { width: 74px; }
+}

@@ -109,6 +109,14 @@ Pour chaque élément des sorts de la classe (et en multi-élément), le program
 
 Options principales : `--niveau` (200), `--pa` (11), `--pm` (6), `--element terre feu eau air neutre multi`, `--exo`, `--max-exo`, `--parchemins` (100), `--sans-points`, `--profil degats|equilibre|tank` (ajoute la vitalité ou les résistances à l'objectif), `--cible aucune|robuste` (`robuste` maximise les dégâts contre la pire de quatre cibles résistantes à 30 % dans un élément), `--top k` et `--diversite d` (k builds différant d'au moins d items), `--json`.
 
+## Interface web
+
+```bash
+python3 -m src.web          # puis ouvrir http://localhost:8000
+```
+
+Une page locale (serveur de la bibliothèque standard, aucune dépendance supplémentaire) pour choisir sa classe, régler le personnage (niveau, PA, PM, parchemins, éléments, exos, profil, cible) et forger les builds : classement par élément, inventaire, fiche de caractéristiques et barre de sorts avec les dégâts de chaque sort au survol. Les icônes sont chargées depuis DofusDB (connexion internet nécessaire).
+
 ## Caractéristiques disponibles
 
 Les caractéristiques peuvent être désignées par leur alias, leur nom (`Vitalité`), leur identifiant (`11`) ou leur nom de colonne (`characteristic_11`), dans `--weights`, `--base-stats` et `--min-stats`. La liste est aussi affichée par `--list-stats`.

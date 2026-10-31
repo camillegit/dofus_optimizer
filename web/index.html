@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forge de Builds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alegreya+SC:wght@500;700;800&family=Alegreya+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='6' y='6' width='20' height='20' rx='4' transform='rotate(45 16 16)' fill='%23f0a43a' stroke='%234a2604' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="banner">
+    <div class="banner-title">
+      <span class="banner-kicker">Atelier de forgemagie</span>
+      <h1>Forge de Builds</h1>
+    </div>
+    <p class="banner-hint">Choisis ta classe, règle ton personnage, et la forge cherche le stuff qui frappe le plus fort.</p>
+  </header>
+
+  <section class="frame breeds" aria-label="Classes">
+    <h2 class="ornate">Classe</h2>
+    <div id="breeds" class="breed-list" role="radiogroup" aria-label="Choix de la classe"></div>
+  </section>
+
+  <main class="layout">
+    <form id="settings" class="frame parchment settings" autocomplete="off">
+      <h2 class="ornate">Personnage</h2>
+
+      <label class="field">
+        <span>Niveau <output id="niveau-out">200</output></span>
+        <input type="range" id="niveau" name="niveau" min="1" max="200" value="200">
+      </label>
+
+      <div class="field-row">
+        <label class="field stepper"><span>PA</span><input type="number" name="pa" min="6" max="14" value="11"></label>
+        <label class="field stepper"><span>PM</span><input type="number" name="pm" min="3" max="8" value="6"></label>
+        <label class="field stepper"><span>Parchemins</span><input type="number" name="parchemins" min="0" max="100" step="10" value="100"></label>
+      </div>
+
+      <fieldset class="field">
+        <legend>Éléments</legend>
+        <div class="orbs">
+          <label class="orb" data-el="terre"><input type="checkbox" name="elements" value="terre"><span>Terre</span></label>
+          <label class="orb" data-el="feu"><input type="checkbox" name="elements" value="feu"><span>Feu</span></label>
+          <label class="orb" data-el="eau"><input type="checkbox" name="elements" value="eau"><span>Eau</span></label>
+          <label class="orb" data-el="air"><input type="checkbox" name="elements" value="air"><span>Air</span></label>
+          <label class="orb" data-el="multi"><input type="checkbox" name="elements" value="multi"><span>Multi</span></label>
+        </div>
+        <small class="note">Aucun coché : tous les éléments de la classe.</small>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend>Exos autorisés</legend>
+        <div class="toggles">
+          <label class="rune"><input type="checkbox" name="exos" value="pa"><span>PA</span></label>
+          <label class="rune"><input type="checkbox" name="exos" value="pm"><span>PM</span></label>
+          <label class="rune"><input type="checkbox" name="exos" value="po"><span>PO</span></label>
+          <label class="field inline"><span>Max</span><input type="number" name="max_exos" min="0" max="8" value="2"></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend>Profil</legend>
+        <div class="seals">
+          <label class="seal"><input type="radio" name="profil" value="degats" checked><span>Dégâts</span></label>
+          <label class="seal"><input type="radio" name="profil" value="equilibre"><span>Équilibré</span></label>
+          <label class="seal"><input type="radio" name="profil" value="tank"><span>Tank</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend>Cible</legend>
+        <div class="seals">
+          <label class="seal"><input type="radio" name="cible" value="aucune" checked><span>Sans résistance</span></label>
+          <label class="seal"><input type="radio" name="cible" value="robuste"><span>Robuste</span></label>
+        </div>
+      </fieldset>
+
+      <div class="field-row">
+        <label class="field stepper"><span>Builds / élément</span><input type="number" name="top" min="1" max="3" value="1"></label>
+        <label class="check"><input type="checkbox" name="no_dofus"><span>Sans Dofus</span></label>
+        <label class="check"><input type="checkbox" name="no_pet"><span>Sans familier</span></label>
+      </div>
+
+      <button type="submit" class="forge-button" id="forge">Forger le build</button>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </form>
+
+    <section class="frame board" aria-label="Résultat">
+      <div id="ladder" class="ladder" aria-label="Classement des builds"></div>
+
+      <div class="board-grid">
+        <div class="board-main">
+        <div class="frame-inner inventory" id="inventory">
+          <div class="slots col-left">
+            <div class="slot" data-slot="chapeau"></div>
+            <div class="slot" data-slot="cape"></div>
+            <div class="slot" data-slot="amulette"></div>
+            <div class="slot" data-slot="ceinture"></div>
+          </div>
+          <div class="avatar">
+            <img id="avatar-img" alt="">
+            <div class="medallion" id="medallion">
+              <span class="medallion-label">Dégâts / tour</span>
+              <strong id="damage-total">—</strong>
+              <span class="medallion-sub" id="damage-sub"></span>
+            </div>
+          </div>
+          <div class="slots col-right">
+            <div class="slot" data-slot="arme"></div>
+            <div class="slot" data-slot="bouclier"></div>
+            <div class="slot" data-slot="anneau1"></div>
+            <div class="slot" data-slot="anneau2"></div>
+          </div>
+          <div class="slots row-bottom">
+            <div class="slot" data-slot="bottes"></div>
+            <div class="slot" data-slot="familier"></div>
+            <span class="row-sep" aria-hidden="true"></span>
+            <div class="slot dofus" data-slot="dofus1"></div>
+            <div class="slot dofus" data-slot="dofus2"></div>
+            <div class="slot dofus" data-slot="dofus3"></div>
+            <div class="slot dofus" data-slot="dofus4"></div>
+            <div class="slot dofus" data-slot="dofus5"></div>
+            <div class="slot dofus" data-slot="dofus6"></div>
+          </div>
+          <div class="forging" id="forging" hidden>
+            <div class="rune-spin" aria-hidden="true"></div>
+            <p>La forgemagie opère… <span id="elapsed">0</span> s</p>
+          </div>
+        </div>
+
+        <div class="spellbar-wrap">
+          <h3 class="ornate small light">Sorts — dégâts par lancer</h3>
+          <ol id="spellbar" class="spellbar"></ol>
+        </div>
+        </div>
+
+        <aside class="frame-inner parchment sheet" aria-label="Caractéristiques">
+          <h3 class="ornate small">Caractéristiques</h3>
+          <dl id="stats" class="stats"></dl>
+          <div id="extras" class="extras"></div>
+        </aside>
+      </div>
+
+    </section>
+  </main>
+
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+
+  <footer class="credits">Données : DofusDB. Formules de dégâts au jet moyen ; effets différés non comptés.</footer>
+  <script src="app.js"></script>
+</body>
+</html>
