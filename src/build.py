@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from pulp import lpSum
 
-from . import characteristics, classes, conditions
+from . import characteristics, classes, conditions, prices
 from .damage import DAMAGE_STATS, ELEMENTS, Target, class_spells, optimize_damage, spells_report
 from .optimizer import (EQUIP_TYPES_MAP, PA, PM, PRIMARY_STATS, Options, base_stats_of, build_model,
                         compute_stats, load_data, set_bonus_count, violated_conditions)
@@ -56,6 +56,9 @@ class BuildRequest:
     diversite: int = 3
     no_dofus: bool = False
     no_pet: bool = False
+    prix: str = None            # CSV file of prices
+    possede: str = None         # file of owned items
+    budget: float = None
 
 
 def to_python(value):
@@ -101,6 +104,7 @@ def describe(model, best, spells, request, element, rank):
         'stats': {characteristics.display_name(c): stats[c] for c in DISPLAY_STATS if stats.get(c)},
         'sorts': sorted(spells_report(spells, best.stats, best.rotation),
                         key=lambda r: (-r['lancers'], -r['esperance'])),
+        'cout': result.cost,
         'conditions_ok': not violated_conditions(model, result),
         'bonus_panoplie_actifs': set_bonus_count(result),
     })
@@ -115,7 +119,12 @@ def build_element(args):
         max_level=request.niveau, pa=request.pa, pm=request.pm, no_dofus=request.no_dofus,
         no_pet=request.no_pet, breed=breed, points=request.points, scrolls=request.parchemins,
         exos=[characteristics.resolve(c) for c in request.exos], max_exos=request.max_exos,
+        budget=request.budget,
     )
+    if request.prix:
+        opts.prices, opts.exo_prices, _ = prices.load_prices(request.prix, items_df)
+    if request.possede:
+        opts.owned = prices.load_owned(request.possede, items_df)
     model = build_model(items_df, bonuses_df, opts)
     builds, stuff_stats = [], []
     for rank in range(1, request.top + 1):
@@ -164,6 +173,8 @@ def print_build(b):
     print(f"\n=== {b['element'].upper()} (#{b['rang']}) : {b['degats_par_tour']:.0f} dégâts par tour ===")
     if len(b['degats_par_cible']) > 1:
         print("  par cible : " + ", ".join(f"{k} {v:.0f}" for k, v in b['degats_par_cible'].items()))
+    if b['cout'] is not None:
+        print(f"Coût : {b['cout']:,.0f} kamas".replace(',', '\u202f'))
     print("Équipement :")
     for item in b['items']:
         exo = f"  [exo {item['exo']}]" if item['exo'] else ""
@@ -199,8 +210,13 @@ def parse_args(argv=None):
     parser.add_argument('--diversite', type=int, default=3, help="Items différents entre deux builds d'un même élément")
     parser.add_argument('--no-dofus', action='store_true')
     parser.add_argument('--no-pet', action='store_true')
+    parser.add_argument('--prix', help='Fichier CSV de prix (colonnes id ou nom, et prix)')
+    parser.add_argument('--possede', help='Fichier des items possédés (coût nul)')
+    parser.add_argument('--budget', type=float, help='Budget maximal en kamas (nécessite --prix)')
     parser.add_argument('--json', action='store_true', help='Sortie JSON')
     args = parser.parse_args(argv)
+    if args.budget is not None and not args.prix:
+        parser.error('--budget nécessite --prix')
     try:
         conditions.class_id(args.classe)
         for c in args.exo:
@@ -211,7 +227,7 @@ def parse_args(argv=None):
         classe=args.classe, niveau=args.niveau, pa=args.pa, pm=args.pm, elements=args.element,
         exos=args.exo, max_exos=args.max_exo, parchemins=args.parchemins, points=not args.sans_points,
         profil=args.profil, cible=args.cible, top=args.top, diversite=args.diversite,
-        no_dofus=args.no_dofus, no_pet=args.no_pet,
+        no_dofus=args.no_dofus, no_pet=args.no_pet, prix=args.prix, possede=args.possede, budget=args.budget,
     ), args.json
 
 

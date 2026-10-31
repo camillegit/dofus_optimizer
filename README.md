@@ -80,6 +80,21 @@ Si aucune combinaison ne respecte les contraintes, le programme l'indique (statu
 pytest
 ```
 
+### Prix, budget et front de Pareto
+
+Aucune source publique ne fournit les prix de l'hôtel des ventes : les prix sont lus dans un fichier CSV (séparateur `;` ou `,`) avec une colonne `id` ou `nom` et une colonne `prix` en kamas. Le prix des exos se renseigne avec les noms `exo pa`, `exo pm`, `exo po`. Voir `data/prix_exemple.csv`.
+
+```bash
+python3 src/optimizer.py --weights force:1 pui:1 --pa 11 --pm 6 --prix mes_prix.csv --pareto 6
+```
+
+* `--prix` : fichier de prix. Les items absents du fichier sont gratuits, ou exclus avec `--prix-inconnu exclure`.
+* `--possede` : fichier des items possédés (un identifiant ou un nom par ligne), comptés gratuits.
+* `--budget` : coût maximal du stuff.
+* `--pareto N` : calcule N compromis objectif / coût (méthode epsilon-contrainte, budgets décroissants) et affiche les items qui changent d'un palier à l'autre.
+
+À objectif égal, le stuff le moins cher est retenu. `--prix`, `--possede` et `--budget` sont aussi disponibles pour `src.build`.
+
 ## Meilleurs builds d'une classe (dégâts des sorts)
 
 ```bash

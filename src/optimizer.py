@@ -9,11 +9,12 @@ import pandas as pd
 from pulp import HiGHS, LpAffineExpression, LpMaximize, LpProblem, LpStatus, LpVariable, PULP_CBC_CMD, lpSum
 
 try:
-    from . import characteristics, classes, conditions
+    from . import characteristics, classes, conditions, prices
 except ImportError:  # run as a script: python src/optimizer.py
     import characteristics
     import classes
     import conditions
+    import prices
 
 DATA_PROCESSED_DIR = Path(__file__).resolve().parent.parent / 'data' / 'processed'
 
@@ -84,6 +85,11 @@ class Options:
     scrolls: int = 0             # characteristic scrolls ("parchemins") in each primary stat
     exos: list = field(default_factory=list)   # characteristics allowed as exo (+1), e.g. [PA, PM]
     max_exos: int = None         # maximum number of exos over the whole stuff
+    prices: dict = None          # item id -> kamas (None: no cost model)
+    exo_prices: dict = field(default_factory=dict)   # char -> kamas per exo
+    owned: set = field(default_factory=set)          # owned items cost nothing
+    unknown_price: str = 'gratuit'                   # items without price: 'gratuit' (0) or 'exclure'
+    budget: float = None
 
 
 @dataclass
@@ -101,6 +107,7 @@ class Model:
     extra_bounds: dict = field(default_factory=lambda: defaultdict(lambda: (0, 0)))
     point_terms: dict = field(default_factory=lambda: defaultdict(list))   # part of the base characteristic
     exo_vars: dict = field(default_factory=dict)  # (slot, char) -> number of exos
+    cost_expr: object = None                       # kamas spent (None without prices)
     _cache: dict = field(default_factory=dict, repr=False)
 
     def add_extra(self, char, var, coef, low, high, base=False):
@@ -151,6 +158,13 @@ class Model:
             self._cache[key] = var
         return self._cache[key]
 
+    def cost_penalty(self):
+        """Tie-break toward cheaper stuffs: at most 0.01 over the whole stuff, below any stat difference."""
+        if self.cost_expr is None:
+            return LpAffineExpression()
+        total = sum(abs(c) for _, c in self.cost_expr.items()) or 1
+        return self.cost_expr * (0.01 / total)
+
     def set_bonus_count(self):
         """Number of active set bonuses as counted by the 'pk' condition: sum over sets of (pieces - 1)."""
         return lpSum((k - 1) * var for (_, k), var in self.bonus_vars.items())
@@ -185,6 +199,9 @@ def filter_items(items_df, opts):
         items_df = items_df[items_df['type'] != DOFUS_TYPE]
     if opts.no_pet:
         items_df = items_df[~items_df['type'].isin(PET_MOUNT_TYPES)]
+    if opts.prices is not None and opts.unknown_price == 'exclure':
+        known = set(opts.prices) | set(opts.owned)
+        items_df = items_df[items_df['id'].isin(known)]
     return items_df
 
 
@@ -416,6 +433,50 @@ def assign_exos(model, result_items, slot_exos):
     return assignment
 
 
+def add_cost(model, opts):
+    """Kamas spent on the stuff (owned items are free) and budget constraint."""
+    if opts.prices is None:
+        return
+    terms = [(var, opts.prices.get(i, 0)) for i, var in model.item_vars.items()
+             if i not in opts.owned and opts.prices.get(i, 0)]
+    terms += [(var, opts.exo_prices[char]) for (_, char), var in model.exo_vars.items() if char in opts.exo_prices]
+    model.cost_expr = LpAffineExpression(terms)
+    if opts.budget is not None:
+        model.problem += model.cost_expr <= opts.budget, "Budget"
+
+
+def set_budget(model, budget):
+    """Changes (or removes with None) the budget constraint of a model with prices."""
+    if 'Budget' in model.problem.constraints:
+        del model.problem.constraints['Budget']
+    if budget is not None:
+        model.problem += model.cost_expr <= budget, "Budget"
+
+
+def pareto_front(model, points, solve_fn, value_fn):
+    """Objective / cost trade-offs: solves for decreasing budgets (epsilon-constraint method).
+
+    solve_fn() solves the model and returns a result with a `cost`; value_fn(result) gives its value.
+    Returns [(cost, value, result)] from the most expensive to the cheapest, without duplicates.
+    """
+    set_budget(model, None)
+    first = solve_fn()
+    if first is None or first.cost is None:
+        return []
+    front = [(first.cost, value_fn(first), first)]
+    top = first.cost
+    for k in range(1, points):
+        budget = top * (1 - k / points) ** 2       # denser near cheap stuffs
+        set_budget(model, budget)
+        current = solve_fn()
+        if current is None or current.cost is None:
+            break
+        if all(set(current.items) != set(r.items) for _, _, r in front):
+            front.append((current.cost, value_fn(current), current))
+    set_budget(model, None)
+    return front
+
+
 def weighted_objective(model, weights):
     return lpSum(model.total_stat_expr(char) * w for char, w in weights.items()) \
         - sum(model.base_stats.get(char, 0) * w for char, w in weights.items())
@@ -446,11 +507,12 @@ def build_model(items_df, bonuses_df, opts):
                   item_vars, bonus_vars, base_stats, set_members, opts.breed)
     add_characteristic_points(model, opts)
     add_exos(model, opts)
+    add_cost(model, opts)
     add_slot_constraints(model)
     add_set_bonus_constraints(model)
     add_min_stat_constraints(model, opts)
     add_condition_constraints(model)
-    model.problem += weighted_objective(model, opts.weights), "Total_Weighted_Stats"
+    model.problem += weighted_objective(model, opts.weights) - model.cost_penalty(), "Total_Weighted_Stats"
     return model
 
 
@@ -464,6 +526,7 @@ class Result:
     extras: dict = field(default_factory=dict)      # char -> value of the extra contributions
     points: dict = field(default_factory=dict)      # char -> characteristic points invested
     exos: list = field(default_factory=list)        # (item id, char)
+    cost: float = None                              # kamas (None without prices)
 
 
 def selected(var):
@@ -484,6 +547,8 @@ def solve(model, msg=False, solver='cbc'):
     result.bonuses = [key for key, var in model.bonus_vars.items() if selected(var)]
     slot_exos = {key: round(var.value() or 0) for key, var in model.exo_vars.items()}
     result.exos = assign_exos(model, result.items, {k: n for k, n in slot_exos.items() if n})
+    if model.cost_expr is not None:
+        result.cost = round(model.cost_expr.value() or 0)
     for char, terms in model.extra_terms.items():
         result.extras[char] = round(sum(coef * (var.value() or 0) for var, coef in terms))
     for char, terms in model.point_terms.items():
@@ -508,6 +573,10 @@ def compute_stats(model, result, chars):
 def base_stats_of(model, result):
     chars = set(model.base_stats) | set(result.points)
     return {c: model.base_stats.get(c, 0) + result.points.get(c, 0) for c in chars}
+
+
+def kamas(value):
+    return f"{value:,.0f}".replace(',', '\u202f')
 
 
 def set_bonus_count(result):
@@ -538,6 +607,9 @@ def print_report(model, result, opts, debug_pa_pm=False):
         print("\nExos:")
         for item_id, char in result.exos:
             print(f"- {model.items.at[item_id, 'nom']} : +1 {characteristics.display_name(char)}")
+
+    if result.cost is not None:
+        print(f"\nCoût : {kamas(result.cost)} kamas")
 
     print("\nBonus panoplies:")
     for set_id, k in result.bonuses:
@@ -598,6 +670,12 @@ def parse_args(argv=None):
     parser.add_argument('--parchemins', type=int, default=0, help='Characteristic scrolls in each primary stat (e.g. 100)')
     parser.add_argument('--exo', nargs='+', default=[], help='Characteristics allowed as exo (+1), e.g. pa pm po')
     parser.add_argument('--max-exo', type=int, help='Maximum number of exos')
+    parser.add_argument('--prix', help='CSV file of prices in kamas (columns id or nom, and prix)')
+    parser.add_argument('--possede', help='File of owned items (ids or names), whose cost is 0')
+    parser.add_argument('--prix-inconnu', choices=['gratuit', 'exclure'], default='gratuit',
+                        help='Items missing from the price file: free (default) or excluded')
+    parser.add_argument('--budget', type=float, help='Maximum cost in kamas')
+    parser.add_argument('--pareto', type=int, help='Compute N points of the objective / cost Pareto front')
     parser.add_argument('--solver', choices=sorted(SOLVERS), default='cbc', help='MILP solver (highs requires: pip install highspy)')
     parser.add_argument('--solver-log', action='store_true', help='Show the solver log')
     args = parser.parse_args(argv)
@@ -616,6 +694,7 @@ def options_from_args(args):
         breed=conditions.class_id(args.classe) if args.classe else None,
         points=args.points, scrolls=args.parchemins,
         exos=[characteristics.resolve(c) for c in args.exo], max_exos=args.max_exo,
+        unknown_price=args.prix_inconnu, budget=args.budget,
     )
 
 
@@ -629,12 +708,33 @@ def main(argv=None):
     print("Loading data...")
     items_df, bonuses_df = load_data()
     print("Data loaded.")
+    if args.prix:
+        opts.prices, opts.exo_prices, unmatched = prices.load_prices(args.prix, items_df)
+        print(f"Prix chargés : {len(opts.prices)} items, {len(opts.exo_prices)} exos"
+              + (f" ({len(unmatched)} lignes non reconnues : {', '.join(map(str, unmatched[:5]))}...)" if unmatched else ""))
+    if args.possede:
+        opts.owned = prices.load_owned(args.possede, items_df)
+    if (args.budget is not None or args.pareto) and opts.prices is None:
+        print("Erreur : --budget et --pareto nécessitent --prix")
+        return 2
 
     try:
         model = build_model(items_df, bonuses_df, opts)
     except ValueError as e:
         print(f"Erreur : {e}")
         return 2
+
+    if args.pareto:
+        print(f"\nFront de Pareto ({args.pareto} budgets) :")
+        front = pareto_front(model, args.pareto, lambda: (lambda r: r if r.status == 'Optimal' else None)(
+            solve(model, solver=args.solver)), lambda r: r.objective)
+        previous = None
+        for cost, value, result in front:
+            names = {model.items.at[i, 'nom'] for i in result.items}
+            change = "" if previous is None else f"  (+ {', '.join(sorted(names - previous)) or '—'})"
+            print(f"- {kamas(cost):>15} kamas : objectif {value:.1f}{change}")
+            previous = names
+        return 0
     print("\nSolving the optimization problem...")
     result = solve(model, msg=args.solver_log, solver=args.solver)
     print("Problem solved.")

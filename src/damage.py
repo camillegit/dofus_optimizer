@@ -223,6 +223,7 @@ def evaluate(model, result, spells, targets):
 def set_objective(model, grads, extra_weights):
     """Objective: worst-case linearized damage over targets (+ secondary weighted stats)."""
     secondary = LpAffineExpression([(model.stat_var(c), w) for c, w in extra_weights.items()])
+    secondary -= model.cost_penalty()
     if len(grads) == 1:
         linear = LpAffineExpression([(model.stat_var(c), g) for c, g in grads[0].items()])
         model.problem.setObjective(linear + secondary)
