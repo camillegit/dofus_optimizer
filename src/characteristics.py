@@ -3,8 +3,7 @@ import unicodedata
 
 # id -> (alias, display name)
 CHARACTERISTICS = {
-    -1: ('inconnue', "Inconnue"),
-    0: ('vie', "Points de vie"),
+    -1: ('degats_arme', "Dégâts de l'arme (lignes de dégâts)"),
     1: ('pa', "PA"),
     10: ('force', "Force"),
     11: ('vitalite', "Vitalité"),

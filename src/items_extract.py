@@ -27,8 +27,9 @@ def parse_item_data(item: dict) -> dict | None:
         from_value = effect.get("from")
         to_value = effect.get("to")
 
+        # Characteristic 0 holds non-stat effects (spell boosts, durability, mount data): skipped.
         # Check if both 'from' and 'to' exist, then take the max of both
-        if characteristic is not None and from_value is not None and to_value is not None:
+        if characteristic and from_value is not None and to_value is not None:
             entry[f"characteristic_{characteristic}"] = max(from_value, to_value)
 
     return entry

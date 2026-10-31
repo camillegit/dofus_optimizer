@@ -46,6 +46,7 @@ Cette commande recherche l'équipement optimal pour un personnage jusqu'au nivea
 * `--pa` : PA (Points d'Action) souhaités (par défaut : 9)
 * `--pm` : PM (Points de Mouvement) souhaités (par défaut : 4)
 * `--no-dofus` : Exclut les Dofus et les Trophées de l'optimisation
+* `--no-pet` : Exclut les familiers, montiliers et montures (Dragodinde, Muldo, Volkorne)
 * `--weights` : Liste des caractéristiques et de leurs poids à optimiser. Par exemple, `force:1.0` (ou `characteristic_10:1.0`) pour la Force avec un poids de 1.0.
 * `--base-stats` : Stats de base ajoutées au personnage (ex. `force:200 chance:100`). Ces stats sont prises en compte pour les conditions et les totaux affichés.
 * `--min-stats` : Contraintes de stats minimales additionnelles (ex. `force:100 chance:300`). PA/PM sont exclus ici, utilisez `--pa` et `--pm` pour cela.
@@ -54,6 +55,10 @@ Cette commande recherche l'équipement optimal pour un personnage jusqu'au nivea
 * `--debug-pa-pm` : Affiche le détail des PA/PM (items, bonus de panoplie, base).
 * `--solver` : Solveur MILP, `cbc` (par défaut, fourni avec PuLP) ou `highs` (nécessite `pip install highspy`). Sur ce modèle CBC est le plus rapide (< 1 s par scénario).
 * `--solver-log` : Affiche le journal du solveur.
+
+### Familiers et montures
+
+Familiers, montiliers et montures (Dragodinde, Muldo, Volkorne) occupent un emplacement unique commun. Leurs caractéristiques sont celles indiquées par DofusDB : familier nourri au maximum, monture au niveau maximal. Les objets réservés aux maîtres du jeu (suffixe « (MJ) ») sont exclus.
 
 ### Bonus de panoplie et conditions d'équipement
 
@@ -131,4 +136,3 @@ Les caractéristiques peuvent être désignées par leur alias, leur nom (`Vital
 | 125 | `dommages_melee_pct` | % Dommages mêlée |
 | 140 | `taille` | Taille (%) |
 
-Améliorations prévues : ajouter les familiers/montures

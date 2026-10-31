@@ -19,11 +19,13 @@ EQUIP_TYPES_MAP = {
     16: "Chapeau", 17: "Cape", 9: "Anneau", 1: "Amulette", 3: "Baguette",
     11: "Bottes", 10: "Ceinture", 7: "Marteau", 4: "Bâton", 2: "Arc",
     5: "Dague", 6: "Épée", 19: "Hache", 22: "Faux", 8: "Pelle",
-    151: "Trophée", 23: "Dofus", 82: "Boucliers"
+    151: "Trophée", 23: "Dofus", 82: "Boucliers",
+    18: "Familier", 121: "Montilier", 331: "Dragodinde", 332: "Muldo", 333: "Volkorne",
 }
 
 WEAPON_TYPES = [3, 7, 4, 2, 5, 6, 19, 22, 8]
 DOFUS_TROPHY_TYPES = [151, 23]
+PET_MOUNT_TYPES = [18, 121, 331, 332, 333]
 RING_TYPE = 9
 DOFUS_TYPE = 23
 
@@ -65,6 +67,7 @@ class Options:
     pa: int = 9
     pm: int = 4
     no_dofus: bool = False
+    no_pet: bool = False
     weights: dict = field(default_factory=dict)
     base_stats: dict = field(default_factory=dict)
     min_stats: dict = field(default_factory=dict)
@@ -145,15 +148,19 @@ class Model:
 def filter_items(items_df, opts):
     items_df = items_df[(items_df['niveau'] >= opts.min_level) & (items_df['niveau'] <= opts.max_level)]
     items_df = items_df[~items_df['id'].isin(BANNED_ITEMS)]
+    # Game master items, not obtainable
+    items_df = items_df[~items_df['nom'].fillna('').str.endswith('(MJ)')]
     if opts.no_dofus:
         items_df = items_df[items_df['type'] != DOFUS_TYPE]
+    if opts.no_pet:
+        items_df = items_df[~items_df['type'].isin(PET_MOUNT_TYPES)]
     return items_df
 
 
 def add_slot_constraints(model):
     problem, items = model.problem, model.items
     for item_type, group in items.groupby('type'):
-        if item_type in WEAPON_TYPES:
+        if item_type in WEAPON_TYPES or item_type in PET_MOUNT_TYPES:
             continue
         limit = 1
         if item_type == RING_TYPE:
@@ -167,6 +174,10 @@ def add_slot_constraints(model):
 
     dofus_trophies = items.index[items['type'].isin(DOFUS_TROPHY_TYPES)]
     problem += lpSum(model.item_vars[i] for i in dofus_trophies) <= 6, "Dofus_Trophy_Combined_Constraint"
+
+    # Pets, petsmounts and mounts share a single slot
+    pets_mounts = items.index[items['type'].isin(PET_MOUNT_TYPES)]
+    problem += lpSum(model.item_vars[i] for i in pets_mounts) <= 1, "Pet_Mount_Constraint"
 
 
 def add_set_bonus_constraints(model):
@@ -429,6 +440,7 @@ def parse_args(argv=None):
     parser.add_argument('--pa', type=int, default=9, help='Desired PA')
     parser.add_argument('--pm', type=int, default=4, help='Desired PM')
     parser.add_argument('--no-dofus', action='store_true', help='Exclude Dofus and Trophies')
+    parser.add_argument('--no-pet', action='store_true', help='Exclude pets and mounts')
     parser.add_argument('--weights', nargs='+', default=[], help='Characteristics and weights (e.g., force:1 vita:0.5 or characteristic_10:1)')
     parser.add_argument('--base-stats', nargs='+', default=[], help='Base stats overrides (e.g., force:200 pa:7)')
     parser.add_argument('--debug-pa-pm', action='store_true', help='Print PA/PM contributions (items, set bonuses, base)')
@@ -448,7 +460,7 @@ def parse_args(argv=None):
 def options_from_args(args):
     return Options(
         min_level=args.min_level, max_level=args.max_level, pa=args.pa, pm=args.pm,
-        no_dofus=args.no_dofus, weights=parse_stat_list(args.weights),
+        no_dofus=args.no_dofus, no_pet=args.no_pet, weights=parse_stat_list(args.weights),
         base_stats=parse_stat_list(args.base_stats), min_stats=parse_stat_list(args.min_stats),
         breed=conditions.class_id(args.classe) if args.classe else None,
     )

@@ -41,6 +41,14 @@ def test_min_pa_and_infeasible():
     assert result.status == 'Infeasible'
 
 
+def test_game_master_items_excluded():
+    items = make_items([
+        {'id': 1, 'type': 18, 'nom': 'Surpuissant Chacha de Combat (MJ)', FORCE: 500},
+        {'id': 2, 'type': 18, 'nom': 'Chacha', FORCE: 70},
+    ])
+    assert optimize(items, weights={FORCE: 1})[1].items == [2]
+
+
 def test_level_filter():
     items = make_items([
         {'id': 1, 'type': 16, 'niveau': 150, FORCE: 100},
@@ -69,3 +77,17 @@ def test_highs_matches_cbc(real_data):
     opts = dict(max_level=100, pa=10, pm=5, weights={FORCE: 1, 'characteristic_11': 0.5})
     objectives = {s: solve(build_model(*real_data, Options(**opts)), solver=s).objective for s in ('cbc', 'highs')}
     assert objectives['cbc'] == pytest.approx(objectives['highs'])
+
+
+def test_pets_and_mounts_share_one_slot():
+    items = make_items([
+        {'id': 1, 'type': 18, FORCE: 80},     # pet
+        {'id': 2, 'type': 121, FORCE: 70},    # petsmount
+        {'id': 3, 'type': 332, PA: 1},        # mount (Muldo)
+    ])
+    _, result = optimize(items, weights={FORCE: 1})
+    assert result.items == [1]
+    _, result = optimize(items, weights={FORCE: 1}, pa=8)    # 7 base PA + Muldo
+    assert result.items == [3]
+    _, result = optimize(items, weights={FORCE: 1}, no_pet=True)
+    assert result.items == []
