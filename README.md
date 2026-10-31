@@ -22,6 +22,7 @@ Les fichiers de données nécessaires sont déjà inclus dans le répertoire `da
 ```bash
 python3 -m src.items_extract
 python3 -m src.pano_extract
+python3 -m src.classes_extract
 python3 -m src.preprocess
 ```
 

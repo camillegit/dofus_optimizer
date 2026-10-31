@@ -1,7 +1,8 @@
 from pathlib import Path
 
-BASE_URL_ITEMS = "https://api.dofusdb.fr/items"
-BASE_URL_PANOS = "https://api.dofusdb.fr/item-sets"
+BASE_URL = "https://api.dofusdb.fr"
+BASE_URL_ITEMS = f"{BASE_URL}/items"
+BASE_URL_PANOS = f"{BASE_URL}/item-sets"
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data" / "extracted"
@@ -9,6 +10,7 @@ PROCESSED_DIR = ROOT_DIR / "data" / "processed"
 
 ITEMS_FILE = PROCESSED_DIR / "dofus_items_processed.parquet"
 BONUSES_FILE = PROCESSED_DIR / "dofus_panos_processed.parquet"
+CLASSES_FILE = PROCESSED_DIR / "classes.json"
 
 # ["Chapeau", "Cape", "Anneau", "Amulette", "Baguette", "Bottes", "Ceinture", "Marteau", "Bâton", "Arc",
 #  "Dague", "Épée", "Hache", "Faux", "Pelle", "Trophée", "Dofus", "Boucliers"]

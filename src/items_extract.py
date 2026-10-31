@@ -19,6 +19,7 @@ def parse_item_data(item: dict) -> dict | None:
         "pano": item.get("itemSetId"),
         "condition": item.get("criterions") or None,
         "deux_mains": bool(item.get("twoHanded")),
+        "img": item.get("img"),
     }
 
     # Iterate over each effect in the 'effects' list
