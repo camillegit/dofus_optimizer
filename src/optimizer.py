@@ -1,6 +1,7 @@
 import argparse
 import sys
 from collections import defaultdict
+from itertools import combinations
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,8 +37,9 @@ PA, PM = 'characteristic_1', 'characteristic_23'
 PRIMARY_STATS = ['characteristic_10', 'characteristic_15', 'characteristic_13', 'characteristic_14',
                  'characteristic_11', 'characteristic_12']
 POINTS_PER_LEVEL = 5
-# Item types that can receive an exotic rune ("exo"): hat, cape, amulet, ring, belt, boots and weapons
-EXO_TYPES = [16, 17, 1, 9, 10, 11] + WEAPON_TYPES
+# Slots that can receive an exotic rune ("exo"): hat, cape, amulet, rings, belt, boots and weapon
+EXO_SLOTS = {'chapeau': [16], 'cape': [17], 'amulette': [1], 'anneaux': [9], 'ceinture': [10],
+             'bottes': [11], 'arme': WEAPON_TYPES}
 
 
 def load_data(data_dir=DATA_PROCESSED_DIR):
@@ -98,7 +100,7 @@ class Model:
     extra_terms: dict = field(default_factory=lambda: defaultdict(list))
     extra_bounds: dict = field(default_factory=lambda: defaultdict(lambda: (0, 0)))
     point_terms: dict = field(default_factory=lambda: defaultdict(list))   # part of the base characteristic
-    exo_vars: dict = field(default_factory=dict)  # (item id, char) -> binary
+    exo_vars: dict = field(default_factory=dict)  # (slot, char) -> number of exos
     _cache: dict = field(default_factory=dict, repr=False)
 
     def add_extra(self, char, var, coef, low, high, base=False):
@@ -364,24 +366,54 @@ def add_characteristic_points(model, opts):
 
 
 def add_exos(model, opts):
-    """Exotic runes: +1 in a characteristic the item does not have, at most one per worn item."""
+    """Exotic runes: +1 in a characteristic the item does not have, at most one per worn item.
+
+    One integer variable per (slot, characteristic). By Hall's theorem, the exos can be assigned to
+    distinct worn items iff for every subset T of characteristics, the number of exos in T does not
+    exceed the number of worn items of the slot able to receive one of T.
+    """
     if not opts.exos:
         return
-    candidates = model.items.index[model.items['type'].isin(EXO_TYPES)]
-    for item_id in candidates:
-        item_exos = []
+    subsets = [c for r in range(1, len(opts.exos) + 1) for c in combinations(opts.exos, r)]
+    for slot, types in EXO_SLOTS.items():
+        slot_items = model.items.index[model.items['type'].isin(types)]
+        if not len(slot_items):
+            continue
+        capacity = 2 if slot == 'anneaux' else 1
+        slot_vars = {}
         for char in opts.exos:
-            native = model.items.at[item_id, char] if char in model.items.columns else 0
-            if native != 0:
-                continue
-            var = LpVariable(f"exo_{item_id}_{char}", cat='Binary')
-            model.exo_vars[item_id, char] = var
-            model.add_extra(char, var, 1, 0, 1)
-            item_exos.append(var)
-        if item_exos:
-            model.problem += lpSum(item_exos) <= model.item_vars[item_id], f"Exo_{item_id}"
+            var = LpVariable(f"exo_{slot}_{char}", 0, capacity, cat='Integer')
+            slot_vars[char] = var
+            model.exo_vars[slot, char] = var
+            model.add_extra(char, var, 1, 0, capacity)
+        for subset in subsets:
+            eligible = [i for i in slot_items
+                        if any(c not in model.items.columns or model.items.at[i, c] == 0 for c in subset)]
+            model.problem += (lpSum(slot_vars[c] for c in subset) <= lpSum(model.item_vars[i] for i in eligible),
+                              f"Exo_{slot}_{'_'.join(subset)}")
     if opts.max_exos is not None:
         model.problem += lpSum(model.exo_vars.values()) <= opts.max_exos, "Max_Exos"
+
+
+def assign_exos(model, result_items, slot_exos):
+    """Assigns exos counted per slot to worn items (each item at most one exo, never on a native stat)."""
+    assignment = []
+    for slot, types in EXO_SLOTS.items():
+        wanted = [c for (s, c), n in slot_exos.items() if s == slot for _ in range(n)]
+        worn = [i for i in result_items if model.items.at[i, 'type'] in types]
+
+        def place(k, free):
+            if k == len(wanted):
+                return []
+            for i in free:
+                if wanted[k] not in model.items.columns or model.items.at[i, wanted[k]] == 0:
+                    rest = place(k + 1, [j for j in free if j != i])
+                    if rest is not None:
+                        return [(i, wanted[k])] + rest
+            return None
+
+        assignment += place(0, worn) or []
+    return assignment
 
 
 def weighted_objective(model, weights):
@@ -450,7 +482,8 @@ def solve(model, msg=False, solver='cbc'):
     result = Result(status, objective=model.problem.objective.value())
     result.items = [i for i, var in model.item_vars.items() if selected(var)]
     result.bonuses = [key for key, var in model.bonus_vars.items() if selected(var)]
-    result.exos = [key for key, var in model.exo_vars.items() if selected(var)]
+    slot_exos = {key: round(var.value() or 0) for key, var in model.exo_vars.items()}
+    result.exos = assign_exos(model, result.items, {k: n for k, n in slot_exos.items() if n})
     for char, terms in model.extra_terms.items():
         result.extras[char] = round(sum(coef * (var.value() or 0) for var, coef in terms))
     for char, terms in model.point_terms.items():
