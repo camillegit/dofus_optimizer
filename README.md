@@ -54,6 +54,8 @@ Cette commande recherche l'équipement optimal pour un personnage jusqu'au nivea
 * `--classe` : Classe du personnage (ex. `iop`, `Écaflip` ou son identifiant), pour les items réservés à une classe. Sans cette option, ces conditions sont considérées comme remplies.
 * `--list-stats` : Affiche la liste des caractéristiques et de leurs alias.
 * `--debug-pa-pm` : Affiche le détail des PA/PM (items, bonus de panoplie, base).
+* `--points` : Répartit aussi les points de caractéristiques (5 par niveau, `--max-level` étant le niveau du personnage) selon les paliers de coût de la classe (nécessite `--classe`).
+* `--parchemins` : Parchemins de caractéristiques dans chaque caractéristique principale (ex. `100`).
 * `--solver` : Solveur MILP, `cbc` (par défaut, fourni avec PuLP) ou `highs` (nécessite `pip install highspy`). Sur ce modèle CBC est le plus rapide (< 1 s par scénario).
 * `--solver-log` : Affiche le journal du solveur.
 

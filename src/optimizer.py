@@ -8,9 +8,10 @@ import pandas as pd
 from pulp import HiGHS, LpAffineExpression, LpMaximize, LpProblem, LpStatus, LpVariable, PULP_CBC_CMD, lpSum
 
 try:
-    from . import characteristics, conditions
+    from . import characteristics, classes, conditions
 except ImportError:  # run as a script: python src/optimizer.py
     import characteristics
+    import classes
     import conditions
 
 DATA_PROCESSED_DIR = Path(__file__).resolve().parent.parent / 'data' / 'processed'
@@ -32,6 +33,9 @@ DOFUS_TYPE = 23
 BANNED_ITEMS = [2155, 8575, 27265, 27266, 27267, 27268, 27278, 27280, 27282, 27284, 9031, 2447, 6713]
 
 PA, PM = 'characteristic_1', 'characteristic_23'
+PRIMARY_STATS = ['characteristic_10', 'characteristic_15', 'characteristic_13', 'characteristic_14',
+                 'characteristic_11', 'characteristic_12']
+POINTS_PER_LEVEL = 5
 
 
 def load_data(data_dir=DATA_PROCESSED_DIR):
@@ -72,6 +76,8 @@ class Options:
     base_stats: dict = field(default_factory=dict)
     min_stats: dict = field(default_factory=dict)
     breed: int = None            # character class (DofusDB breed id), for PG conditions
+    points: bool = False         # allocate characteristic points (requires breed)
+    scrolls: int = 0             # characteristic scrolls ("parchemins") in each primary stat
 
 
 @dataclass
@@ -84,7 +90,19 @@ class Model:
     base_stats: dict
     set_members: dict = field(default_factory=dict)   # set_id -> item ids
     breed: int = None
+    # Additional decision-dependent contributions (characteristic points, exos...): char -> [(var, coef)]
+    extra_terms: dict = field(default_factory=lambda: defaultdict(list))
+    extra_bounds: dict = field(default_factory=lambda: defaultdict(lambda: (0, 0)))
+    point_terms: dict = field(default_factory=lambda: defaultdict(list))   # part of the base characteristic
     _cache: dict = field(default_factory=dict, repr=False)
+
+    def add_extra(self, char, var, coef, low, high, base=False):
+        """Adds coef * var to a characteristic total, var * coef being within [low, high]."""
+        self.extra_terms[char].append((var, coef))
+        lo, hi = self.extra_bounds[char]
+        self.extra_bounds[char] = (lo + low, hi + high)
+        if base:
+            self.point_terms[char].append((var, coef))
 
     def item_stat(self, char):
         """item id -> value, non-zero values only."""
@@ -109,7 +127,12 @@ class Model:
     def total_stat_expr(self, char):
         terms = [(self.item_vars[i], v) for i, v in self.item_stat(char).items()]
         terms += [(self.bonus_vars[key], v) for key, v in self.bonus_stat(char).items()]
+        terms += self.extra_terms.get(char, [])
         return LpAffineExpression(terms, constant=self.base_stats.get(char, 0))
+
+    def base_stat_expr(self, char):
+        """Base characteristic (points invested + scrolls + given base stats)."""
+        return LpAffineExpression(self.point_terms.get(char, []), constant=self.base_stats.get(char, 0))
 
     def stat_var(self, char):
         """Continuous variable equal to the total of a characteristic (defined once, keeps constraints sparse)."""
@@ -140,8 +163,9 @@ class Model:
         for (set_id, _), value in self.bonus_stat(char).items():
             tiers[set_id].append(value)
         base = self.base_stats.get(char, 0)
-        low = base + sum(min(0, v) for v in item_values) + sum(min(0, *v) for v in tiers.values())
-        high = base + sum(max(0, v) for v in item_values) + sum(max(0, *v) for v in tiers.values())
+        extra_low, extra_high = self.extra_bounds.get(char, (0, 0))
+        low = base + extra_low + sum(min(0, v) for v in item_values) + sum(min(0, *v) for v in tiers.values())
+        high = base + extra_high + sum(max(0, v) for v in item_values) + sum(max(0, *v) for v in tiers.values())
         return low, high
 
 
@@ -255,7 +279,12 @@ class ConditionBuilder:
         if kind == 'class':
             return conditions.compare(self.model.breed, op, int(value))
         if kind == 'base':
-            return conditions.compare(self.model.base_stats.get(conditions.atom_char(code), 0), op, int(value))
+            char = conditions.atom_char(code)
+            base = self.model.base_stats.get(char, 0)
+            if not self.model.point_terms.get(char):
+                return conditions.compare(base, op, int(value))
+            _, high = self.model.extra_bounds[char]
+            return self.comparison(self.model.base_stat_expr(char), (base, base + high), op, int(value))
         if kind == 'set_bonus':
             expr = self.model.set_bonus_count_var()
             bounds = (0, sum(len(m) - 1 for m in self.model.set_members.values()))
@@ -301,6 +330,34 @@ def add_condition_constraints(model):
         model.problem += model.item_vars[item_id] <= (0 if indicator is False else indicator), f"Cond_item_{item_id}"
 
 
+def point_segments(tiers):
+    """[[0, 1], [100, 2], [200, 3]] -> [(width, cost)], the last segment being unbounded (None)."""
+    starts = [start for start, _ in tiers] + [None]
+    return [(None if nxt is None else nxt - start, cost) for (start, cost), nxt in zip(tiers, starts[1:])]
+
+
+def add_characteristic_points(model, opts):
+    """Characteristic points as decision variables: 5 per level, cost tiers of the class."""
+    if not opts.points:
+        return
+    if opts.breed is None:
+        raise ValueError("--points requires --classe (point costs depend on the class)")
+    total = POINTS_PER_LEVEL * (opts.max_level - 1)
+    costs = classes.get_class(opts.breed)['couts']
+    spent = []
+    for char in PRIMARY_STATS:
+        remaining = total
+        for j, (width, cost) in enumerate(point_segments(costs.get(char, [[0, 1]]))):
+            cap = remaining // cost if width is None else min(width, remaining // cost)
+            if cap <= 0:
+                break
+            var = LpVariable(f"points_{char}_{j}", 0, cap, cat='Integer')
+            model.add_extra(char, var, 1, 0, cap, base=True)
+            spent.append((var, cost))
+            remaining -= cap * cost
+    model.problem += LpAffineExpression(spent) <= total, "Characteristic_Points"
+
+
 def weighted_objective(model, weights):
     return lpSum(model.total_stat_expr(char) * w for char, w in weights.items()) \
         - sum(model.base_stats.get(char, 0) * w for char, w in weights.items())
@@ -323,9 +380,13 @@ def build_model(items_df, bonuses_df, opts):
     base_stats = dict(opts.base_stats)
     base_stats.setdefault(PA, 7 if opts.max_level >= 100 else 6)
     base_stats.setdefault(PM, 3)
+    for char in PRIMARY_STATS:
+        if opts.scrolls:
+            base_stats[char] = base_stats.get(char, 0) + opts.scrolls
 
     model = Model(LpProblem("Optimal_Stuff_Combination", LpMaximize), items, bonuses,
                   item_vars, bonus_vars, base_stats, set_members, opts.breed)
+    add_characteristic_points(model, opts)
     add_slot_constraints(model)
     add_set_bonus_constraints(model)
     add_min_stat_constraints(model, opts)
@@ -341,6 +402,8 @@ class Result:
     bonuses: list = field(default_factory=list)     # selected (set_id, k)
     stats: dict = field(default_factory=dict)       # char -> total value
     objective: float = None
+    extras: dict = field(default_factory=dict)      # char -> value of the extra contributions
+    points: dict = field(default_factory=dict)      # char -> characteristic points invested
 
 
 def selected(var):
@@ -359,6 +422,10 @@ def solve(model, msg=False, solver='cbc'):
     result = Result(status, objective=model.problem.objective.value())
     result.items = [i for i, var in model.item_vars.items() if selected(var)]
     result.bonuses = [key for key, var in model.bonus_vars.items() if selected(var)]
+    for char, terms in model.extra_terms.items():
+        result.extras[char] = round(sum(coef * (var.value() or 0) for var, coef in terms))
+    for char, terms in model.point_terms.items():
+        result.points[char] = round(sum(coef * (var.value() or 0) for var, coef in terms))
     return result
 
 
@@ -371,8 +438,14 @@ def compute_stats(model, result, chars):
             sum(item_stat.get(i, 0) for i in result.items)
             + sum(bonus_stat.get(key, 0) for key in result.bonuses)
             + model.base_stats.get(char, 0)
+            + result.extras.get(char, 0)
         )
     return totals
+
+
+def base_stats_of(model, result):
+    chars = set(model.base_stats) | set(result.points)
+    return {c: model.base_stats.get(c, 0) + result.points.get(c, 0) for c in chars}
 
 
 def set_bonus_count(result):
@@ -385,7 +458,7 @@ def violated_conditions(model, result):
     return [
         item_id for item_id in result.items
         if not conditions.evaluate(conditions.parse(model.items.at[item_id, 'condition']),
-                                   totals, model.base_stats, set_bonus_count(result), model.breed)
+                                   totals, base_stats_of(model, result), set_bonus_count(result), model.breed)
     ]
 
 
@@ -404,10 +477,17 @@ def print_report(model, result, opts, debug_pa_pm=False):
         print(f"- Panoplie: {model.bonuses.at[set_id, 'nom']}, Niveau: {k}")
 
     stats_to_display = [PA, PM, 'characteristic_19']
-    stats_to_display += [c for c in list(opts.weights) + list(model.base_stats) if c not in stats_to_display]
+    stats_to_display += [c for c in list(opts.weights) + list(model.base_stats) + [c for c, v in result.points.items() if v]
+                         if c not in stats_to_display]
     print("\nStats totales:")
     for char, value in compute_stats(model, result, stats_to_display).items():
         print(f"- {characteristics.display_name(char)}: {value}")
+
+    if result.points:
+        print("\nPoints de caractéristiques:")
+        for char, value in result.points.items():
+            if value:
+                print(f"- {characteristics.display_name(char)}: {value}")
 
     print("\nConditions d'équipement:")
     violated = violated_conditions(model, result)
@@ -447,6 +527,8 @@ def parse_args(argv=None):
     parser.add_argument('--min-stats', nargs='+', default=[], help='Minimum stats constraints (e.g., force:100 chance:300)')
     parser.add_argument('--list-stats', action='store_true', help='List characteristic ids and aliases, then exit')
     parser.add_argument('--classe', help="Character class (e.g. iop, 'Écaflip' or its id), for class-restricted items")
+    parser.add_argument('--points', action='store_true', help='Optimize the characteristic points allocation (requires --classe)')
+    parser.add_argument('--parchemins', type=int, default=0, help='Characteristic scrolls in each primary stat (e.g. 100)')
     parser.add_argument('--solver', choices=sorted(SOLVERS), default='cbc', help='MILP solver (highs requires: pip install highspy)')
     parser.add_argument('--solver-log', action='store_true', help='Show the solver log')
     args = parser.parse_args(argv)
@@ -463,6 +545,7 @@ def options_from_args(args):
         no_dofus=args.no_dofus, no_pet=args.no_pet, weights=parse_stat_list(args.weights),
         base_stats=parse_stat_list(args.base_stats), min_stats=parse_stat_list(args.min_stats),
         breed=conditions.class_id(args.classe) if args.classe else None,
+        points=args.points, scrolls=args.parchemins,
     )
 
 
@@ -477,7 +560,11 @@ def main(argv=None):
     items_df, bonuses_df = load_data()
     print("Data loaded.")
 
-    model = build_model(items_df, bonuses_df, opts)
+    try:
+        model = build_model(items_df, bonuses_df, opts)
+    except ValueError as e:
+        print(f"Erreur : {e}")
+        return 2
     print("\nSolving the optimization problem...")
     result = solve(model, msg=args.solver_log, solver=args.solver)
     print("Problem solved.")
