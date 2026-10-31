@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
-from pulp import LpMaximize, LpProblem, LpStatus, LpVariable, PULP_CBC_CMD, lpSum
+from pulp import HiGHS, LpAffineExpression, LpMaximize, LpProblem, LpStatus, LpVariable, PULP_CBC_CMD, lpSum
 
 try:
     from . import conditions
@@ -104,33 +104,54 @@ class Model:
     base_stats: dict
     set_members: dict = field(default_factory=dict)   # set_id -> item ids
     breed: int = None
+    _cache: dict = field(default_factory=dict, repr=False)
 
     def item_stat(self, char):
-        if char not in self.items.columns:
-            return {}
-        return self.items[char].to_dict()
+        """item id -> value, non-zero values only."""
+        key = ('item', char)
+        if key not in self._cache:
+            column = self.items[char] if char in self.items.columns else pd.Series(dtype=float)
+            self._cache[key] = column[column != 0].to_dict()
+        return self._cache[key]
 
     def bonus_stat(self, char):
-        """(set_id, k) -> cumulative bonus of that tier (tiers are exclusive, not additive)."""
-        values = {}
-        for (set_id, k) in self.bonus_vars:
-            col = f"bonus_{k}_{char}"
-            if col in self.bonuses.columns:
-                values[(set_id, k)] = self.bonuses.at[set_id, col]
-        return values
+        """(set_id, k) -> cumulative bonus of that tier (tiers are exclusive, not additive), non-zero only."""
+        key = ('bonus', char)
+        if key not in self._cache:
+            values = {}
+            for (set_id, k) in self.bonus_vars:
+                col = f"bonus_{k}_{char}"
+                if col in self.bonuses.columns and self.bonuses.at[set_id, col] != 0:
+                    values[(set_id, k)] = self.bonuses.at[set_id, col]
+            self._cache[key] = values
+        return self._cache[key]
 
     def total_stat_expr(self, char):
-        item_stat = self.item_stat(char)
-        bonus_stat = self.bonus_stat(char)
-        return (
-            lpSum(var * item_stat.get(i, 0) for i, var in self.item_vars.items())
-            + lpSum(var * bonus_stat.get(key, 0) for key, var in self.bonus_vars.items())
-            + self.base_stats.get(char, 0)
-        )
+        terms = [(self.item_vars[i], v) for i, v in self.item_stat(char).items()]
+        terms += [(self.bonus_vars[key], v) for key, v in self.bonus_stat(char).items()]
+        return LpAffineExpression(terms, constant=self.base_stats.get(char, 0))
+
+    def stat_var(self, char):
+        """Continuous variable equal to the total of a characteristic (defined once, keeps constraints sparse)."""
+        key = ('var', char)
+        if key not in self._cache:
+            low, high = self.stat_bounds(char)
+            var = LpVariable(f"total_{char}", low, high)
+            self.problem += var == self.total_stat_expr(char), f"Total_{char}"
+            self._cache[key] = var
+        return self._cache[key]
 
     def set_bonus_count(self):
         """Number of active set bonuses as counted by the 'pk' condition: sum over sets of (pieces - 1)."""
         return lpSum((k - 1) * var for (_, k), var in self.bonus_vars.items())
+
+    def set_bonus_count_var(self):
+        key = ('var', 'set_bonus_count')
+        if key not in self._cache:
+            var = LpVariable("total_set_bonus_count", 0, sum(len(m) - 1 for m in self.set_members.values()))
+            self.problem += var == self.set_bonus_count(), "Total_set_bonus_count"
+            self._cache[key] = var
+        return self._cache[key]
 
     def stat_bounds(self, char):
         """Lower/upper bounds of the total of a characteristic over all feasible stuffs."""
@@ -248,11 +269,11 @@ class ConditionBuilder:
         if kind == 'base':
             return conditions.compare(self.model.base_stats.get(conditions.atom_char(code), 0), op, int(value))
         if kind == 'set_bonus':
-            expr = self.model.set_bonus_count()
+            expr = self.model.set_bonus_count_var()
             bounds = (0, sum(len(m) - 1 for m in self.model.set_members.values()))
         else:
             char = conditions.atom_char(code)
-            expr, bounds = self.model.total_stat_expr(char), self.model.stat_bounds(char)
+            expr, bounds = self.model.stat_var(char), self.model.stat_bounds(char)
         return self.comparison(expr, bounds, op, int(value))
 
     def comparison(self, expr, bounds, op, value):
@@ -338,8 +359,11 @@ def selected(var):
     return var.value() is not None and var.value() > 0.5
 
 
-def solve(model, msg=False):
-    model.problem.solve(PULP_CBC_CMD(msg=msg))
+SOLVERS = {'cbc': PULP_CBC_CMD, 'highs': HiGHS}
+
+
+def solve(model, msg=False, solver='cbc'):
+    model.problem.solve(SOLVERS[solver](msg=msg))
     status = LpStatus[model.problem.status]
     if status != 'Optimal':
         return Result(status)
@@ -437,6 +461,7 @@ def parse_args(argv=None):
     parser.add_argument('--debug-pa-pm', action='store_true', help='Print PA/PM contributions (items, set bonuses, base)')
     parser.add_argument('--min-stats', nargs='+', default=[], help='Minimum stats constraints (e.g., characteristic_10:100 characteristic_13:300)')
     parser.add_argument('--classe', help="Character class (e.g. iop, 'Écaflip' or its id), for class-restricted items")
+    parser.add_argument('--solver', choices=sorted(SOLVERS), default='cbc', help='MILP solver (highs requires: pip install highspy)')
     parser.add_argument('--solver-log', action='store_true', help='Show the solver log')
     return parser.parse_args(argv)
 
@@ -460,7 +485,7 @@ def main(argv=None):
 
     model = build_model(items_df, bonuses_df, opts)
     print("\nSolving the optimization problem...")
-    result = solve(model, msg=args.solver_log)
+    result = solve(model, msg=args.solver_log, solver=args.solver)
     print("Problem solved.")
     print_report(model, result, opts, debug_pa_pm=args.debug_pa_pm)
     return 0 if result.status == 'Optimal' else 1

@@ -51,6 +51,7 @@ Cette commande recherche l'équipement optimal pour un personnage jusqu'au nivea
 * `--min-stats` : Contraintes de stats minimales additionnelles (ex. `characteristic_10:100 characteristic_13:300`). PA/PM sont exclus ici, utilisez `--pa` et `--pm` pour cela.
 * `--classe` : Classe du personnage (ex. `iop`, `Écaflip` ou son identifiant), pour les items réservés à une classe. Sans cette option, ces conditions sont considérées comme remplies.
 * `--debug-pa-pm` : Affiche le détail des PA/PM (items, bonus de panoplie, base).
+* `--solver` : Solveur MILP, `cbc` (par défaut, fourni avec PuLP) ou `highs` (nécessite `pip install highspy`). Sur ce modèle CBC est le plus rapide (< 1 s par scénario).
 * `--solver-log` : Affiche le journal du solveur.
 
 ### Bonus de panoplie et conditions d'équipement

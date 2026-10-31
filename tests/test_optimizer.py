@@ -52,3 +52,11 @@ def test_real_data_force_puissance(real_data):
     stats = compute_stats(model, result, [PA, 'characteristic_23'])
     assert stats[PA] >= 12 and stats['characteristic_23'] >= 6
     assert result.objective > 0
+
+
+def test_highs_matches_cbc(real_data):
+    pytest.importorskip('highspy')
+    from src.optimizer import Options, build_model, solve
+    opts = dict(max_level=100, pa=10, pm=5, weights={FORCE: 1, 'characteristic_11': 0.5})
+    objectives = {s: solve(build_model(*real_data, Options(**opts)), solver=s).objective for s in ('cbc', 'highs')}
+    assert objectives['cbc'] == pytest.approx(objectives['highs'])
