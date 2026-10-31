@@ -12,6 +12,7 @@ linearizes it around the current stuff (exact partial derivatives), solves the M
 rotation and repeats; every stuff is evaluated with the exact formula and the best one is kept.
 """
 import math
+import re
 from dataclasses import dataclass, field
 
 from pulp import LpAffineExpression, LpVariable
@@ -73,12 +74,30 @@ class Spell:
         return max(weight, key=weight.get)
 
 
+# Target mask letters of a standard enemy (player or monster); J/j are summons, a/c allies and caster
+ENEMY_TARGETS = {'A', 'L', 'M', 'D', 'H'}
+REQUIRED_CONDITION = re.compile(r'^\*?[EF]\d')     # target / caster must have a state, or be a given creature
+
+
+def hits_standard_enemy(mask):
+    """Whether an effect applies to an ordinary enemy (no state, not a summon).
+
+    Several lines of a spell are often alternatives depending on the target (summons, states):
+    only the lines applying to an ordinary enemy are counted.
+    """
+    tokens = [t for t in (mask or 'A').split(',') if t]
+    if any(REQUIRED_CONDITION.match(t) for t in tokens):
+        return False
+    return bool(ENEMY_TARGETS & set(tokens))
+
+
 def damage_lines(effects):
-    """Immediate damage / life steal lines: [(element, min, max)]."""
+    """Immediate damage / life steal lines hitting an ordinary enemy: [(element, min, max)]."""
     return [
         (EFFECT_ELEMENT[e['effet']], e['min'], e['max'])
         for e in effects
         if e['effet'] in EFFECT_ELEMENT and e.get('declencheurs') == 'I' and not e.get('duree')
+        and hits_standard_enemy(e.get('cibles'))
     ]
 
 

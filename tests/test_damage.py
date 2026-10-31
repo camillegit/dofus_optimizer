@@ -46,6 +46,17 @@ def test_gradient_is_exact_partial_derivative():
     assert grad['characteristic_16'] == pytest.approx(2)
 
 
+def test_alternative_lines_by_target():
+    from src.damage import hits_standard_enemy
+    assert hits_standard_enemy('A') and hits_standard_enemy('A,a') and hits_standard_enemy('L,M,l,m,c')
+    assert hits_standard_enemy('A,e590') and hits_standard_enemy('*e7120,A')
+    assert not hits_standard_enemy('J,j') and not hits_standard_enemy('A,E590') and not hits_standard_enemy('*E296,A')
+    assert not hits_standard_enemy('a,e12') and not hits_standard_enemy('A,F3')
+    iop = {s.name: s for s in class_spells(8, 200)}
+    assert len(iop['Concentration'].lines) == 1 and iop['Concentration'].lines[0].low == 20
+    assert len(iop['Tempête de Puissance'].lines) == 1
+
+
 def test_feca_spells():
     spells = {s.name: s for s in class_spells(1, 200)}
     assert spells['Retour du Bâton'].elements == ['terre']
