@@ -104,14 +104,17 @@ def test_set_bonus_condition_counts_all_bonuses():
     assert 5 in result.items and len(result.items) == 4 and result.bonuses == [(1, 2)]
 
 
-def test_shield_and_two_handed_weapon():
+def test_class_condition():
     items = make_items([
-        {'id': 1, 'type': 7, FORCE: 100, 'deux_mains': True},
-        {'id': 2, 'type': 82, FORCE: 60},
-        {'id': 3, 'type': 6, FORCE: 50, 'deux_mains': False},
+        {'id': 1, 'type': 6, FORCE: 100, 'condition': 'PG=6&PS=0'},
+        {'id': 2, 'type': 7, FORCE: 50},
     ])
-    _, result = optimize(items, weights={FORCE: 1})
-    assert sorted(result.items) == [2, 3]
+    assert optimize(items, weights={FORCE: 1})[1].items == [1]            # class unknown: permissive
+    assert optimize(items, weights={FORCE: 1}, breed=8)[1].items == [2]   # Iop
+    assert optimize(items, weights={FORCE: 1}, breed=6)[1].items == [1]   # Ecaflip
+    assert conditions.class_id('Écaflip') == conditions.class_id('6') == 6
+    with pytest.raises(ValueError):
+        conditions.class_id('paladin')
 
 
 # --- real data ------------------------------------------------------------------------

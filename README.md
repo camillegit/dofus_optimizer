@@ -49,6 +49,7 @@ Cette commande recherche l'équipement optimal pour un personnage jusqu'au nivea
 * `--weights` : Liste des caractéristiques et de leurs poids à optimiser. Par exemple, `characteristic_10:1.0` pour la Force avec un poids de 1.0.
 * `--base-stats` : Stats de base ajoutées au personnage (ex. `characteristic_10:200 characteristic_13:100`). Ces stats sont prises en compte pour les conditions et les totaux affichés.
 * `--min-stats` : Contraintes de stats minimales additionnelles (ex. `characteristic_10:100 characteristic_13:300`). PA/PM sont exclus ici, utilisez `--pa` et `--pm` pour cela.
+* `--classe` : Classe du personnage (ex. `iop`, `Écaflip` ou son identifiant), pour les items réservés à une classe. Sans cette option, ces conditions sont considérées comme remplies.
 * `--debug-pa-pm` : Affiche le détail des PA/PM (items, bonus de panoplie, base).
 * `--solver-log` : Affiche le journal du solveur.
 
@@ -56,7 +57,7 @@ Cette commande recherche l'équipement optimal pour un personnage jusqu'au nivea
 
 * Un seul palier de bonus est actif par panoplie : celui qui correspond au nombre exact de pièces portées (les paliers ne se cumulent pas, les malus de palier sont imposés).
 * Les conditions d'équipement des items sont prises en compte : caractéristiques totales (`CS>399`, `CP<12|CM<6`…), caractéristiques de base (`Cs>99`, comparées à `--base-stats`) et nombre de bonus de panoplie actifs (`pk<2` : somme sur les panoplies de « pièces portées − 1 »). Les opérateurs ET (`&`), OU (`|`), les parenthèses et `!` (différent de) sont gérés.
-* Les conditions qui ne dépendent pas des caractéristiques (métier, quête, classe, alignement…) sont considérées comme remplies ; le rapport liste les items concernés « à vérifier en jeu ».
+* Les conditions qui ne dépendent pas des caractéristiques (métier, quête, alignement…, et classe si `--classe` n'est pas donné) sont considérées comme remplies ; le rapport liste les items concernés « à vérifier en jeu ».
 * Le rapport vérifie indépendamment que les conditions des items retenus sont respectées par les stats finales.
 
 Si aucune combinaison ne respecte les contraintes, le programme l'indique (statut du solveur) et retourne un code d'erreur.

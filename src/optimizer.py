@@ -43,7 +43,6 @@ WEAPON_TYPES = [3, 7, 4, 2, 5, 6, 19, 22, 8]
 DOFUS_TROPHY_TYPES = [151, 23]
 RING_TYPE = 9
 DOFUS_TYPE = 23
-SHIELD_TYPE = 82
 
 BANNED_ITEMS = [2155, 8575, 27265, 27266, 27267, 27268, 27278, 27280, 27282, 27284, 9031, 2447, 6713]
 
@@ -92,6 +91,7 @@ class Options:
     weights: dict = field(default_factory=dict)
     base_stats: dict = field(default_factory=dict)
     min_stats: dict = field(default_factory=dict)
+    breed: int = None            # character class (DofusDB breed id), for PG conditions
 
 
 @dataclass
@@ -103,6 +103,7 @@ class Model:
     bonus_vars: dict             # (set_id, k) -> 1 iff exactly k pieces of the set are worn (k >= 2)
     base_stats: dict
     set_members: dict = field(default_factory=dict)   # set_id -> item ids
+    breed: int = None
 
     def item_stat(self, char):
         if char not in self.items.columns:
@@ -166,14 +167,6 @@ def add_slot_constraints(model):
     weapons = items.index[items['type'].isin(WEAPON_TYPES)]
     problem += lpSum(model.item_vars[i] for i in weapons) <= 1, "Grouped_Types_Constraint"
 
-    # A shield cannot be worn with a two-handed weapon
-    if 'deux_mains' in items.columns:
-        two_handed = items.index[items['type'].isin(WEAPON_TYPES) & items['deux_mains'].astype(bool)]
-        shields = items.index[items['type'] == SHIELD_TYPE]
-        if len(two_handed) and len(shields):
-            problem += (lpSum(model.item_vars[i] for i in list(two_handed) + list(shields)) <= 1,
-                        "Shield_Two_Handed_Constraint")
-
     dofus_trophies = items.index[items['type'].isin(DOFUS_TROPHY_TYPES)]
     problem += lpSum(model.item_vars[i] for i in dofus_trophies) <= 6, "Dofus_Trophy_Combined_Constraint"
 
@@ -206,7 +199,7 @@ class ConditionBuilder:
     """Turns parsed conditions into binary indicators v such that v = 1 implies the condition holds.
 
     An indicator is True/False when the data alone decides the condition. Conditions on jobs,
-    quests, class... are not modelled and are considered satisfied.
+    quests... (and class when it is not given) are not modelled and are considered satisfied.
     """
 
     def __init__(self, model):
@@ -248,8 +241,10 @@ class ConditionBuilder:
 
     def build_atom(self, code, op, value):
         kind = conditions.atom_kind(code)
-        if kind is None or op == '~':
+        if kind is None or op == '~' or (kind == 'class' and self.model.breed is None):
             return True
+        if kind == 'class':
+            return conditions.compare(self.model.breed, op, int(value))
         if kind == 'base':
             return conditions.compare(self.model.base_stats.get(conditions.atom_char(code), 0), op, int(value))
         if kind == 'set_bonus':
@@ -321,7 +316,7 @@ def build_model(items_df, bonuses_df, opts):
     base_stats.setdefault(PM, 3)
 
     model = Model(LpProblem("Optimal_Stuff_Combination", LpMaximize), items, bonuses,
-                  item_vars, bonus_vars, base_stats, set_members)
+                  item_vars, bonus_vars, base_stats, set_members, opts.breed)
     add_slot_constraints(model)
     add_set_bonus_constraints(model)
     add_min_stat_constraints(model, opts)
@@ -378,7 +373,7 @@ def violated_conditions(model, result):
     return [
         item_id for item_id in result.items
         if not conditions.evaluate(conditions.parse(model.items.at[item_id, 'condition']),
-                                   totals, model.base_stats, set_bonus_count(result))
+                                   totals, model.base_stats, set_bonus_count(result), model.breed)
     ]
 
 
@@ -414,7 +409,7 @@ def print_report(model, result, opts, debug_pa_pm=False):
     else:
         print(f"- Conditions de caractéristiques respectées (bonus de panoplie actifs : {set_bonus_count(result)})")
     for item_id in result.items:
-        atoms = conditions.unmodelled_atoms(conditions.parse(model.items.at[item_id, 'condition']))
+        atoms = conditions.unmodelled_atoms(conditions.parse(model.items.at[item_id, 'condition']), model.breed)
         if atoms:
             print(f"- À vérifier en jeu : {model.items.at[item_id, 'nom']} ({', '.join(atoms)})")
 
@@ -441,6 +436,7 @@ def parse_args(argv=None):
     parser.add_argument('--base-stats', nargs='+', default=[], help='Base stats overrides (e.g., characteristic_1:7 characteristic_23:3)')
     parser.add_argument('--debug-pa-pm', action='store_true', help='Print PA/PM contributions (items, set bonuses, base)')
     parser.add_argument('--min-stats', nargs='+', default=[], help='Minimum stats constraints (e.g., characteristic_10:100 characteristic_13:300)')
+    parser.add_argument('--classe', help="Character class (e.g. iop, 'Écaflip' or its id), for class-restricted items")
     parser.add_argument('--solver-log', action='store_true', help='Show the solver log')
     return parser.parse_args(argv)
 
@@ -450,6 +446,7 @@ def options_from_args(args):
         min_level=args.min_level, max_level=args.max_level, pa=args.pa, pm=args.pm,
         no_dofus=args.no_dofus, weights=parse_stat_list(args.weights),
         base_stats=parse_stat_list(args.base_stats), min_stats=parse_stat_list(args.min_stats),
+        breed=conditions.class_id(args.classe) if args.classe else None,
     )
 
 

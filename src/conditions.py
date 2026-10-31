@@ -4,6 +4,7 @@ Grammar: `&` binds tighter than `|`, parentheses group, atoms are `<code><op><va
 (e.g. `CS>399`, `pk<2`, `PJ>2,40`).
 """
 import re
+import unicodedata
 
 TOKEN_REGEX = re.compile(r'\s*(?:(\()|(\))|(&)|(\|)|([A-Za-z]+)\s*(<=|>=|!=|=|<|>|!|~)\s*([^&|()]*))')
 
@@ -14,6 +15,25 @@ STAT_CODES = {
     'M': 'characteristic_23', 'V': 'characteristic_11',
 }
 SET_BONUS_CODES = ('pk', 'PK')
+CLASS_CODE = 'PG'
+
+# DofusDB breed ids (condition PG=<id>)
+CLASSES = {
+    'feca': 1, 'osamodas': 2, 'enutrof': 3, 'sram': 4, 'xelor': 5, 'ecaflip': 6,
+    'eniripsa': 7, 'iop': 8, 'cra': 9, 'sadida': 10, 'sacrieur': 11, 'pandawa': 12,
+    'roublard': 13, 'zobal': 14, 'steamer': 15, 'eliotrope': 16, 'huppermage': 17,
+    'ouginak': 18, 'forgelance': 20,
+}
+
+
+def class_id(name_or_id):
+    """'Écaflip', 'ecaflip' or '6' -> 6."""
+    key = unicodedata.normalize('NFKD', str(name_or_id)).encode('ascii', 'ignore').decode().lower().strip()
+    if key.isdigit() and int(key) in CLASSES.values():
+        return int(key)
+    if key in CLASSES:
+        return CLASSES[key]
+    raise ValueError(f"Unknown class {name_or_id!r} (expected one of: {', '.join(CLASSES)})")
 
 
 class ConditionSyntaxError(ValueError):
@@ -84,9 +104,11 @@ def parse(text):
 
 
 def atom_kind(code):
-    """'total' / 'base' (characteristic), 'set_bonus' or None (not modelled, considered satisfied)."""
+    """'total' / 'base' (characteristic), 'set_bonus', 'class' or None (not modelled, considered satisfied)."""
     if code in SET_BONUS_CODES:
         return 'set_bonus'
+    if code == CLASS_CODE:
+        return 'class'
     if len(code) == 2 and code[0] == 'C' and code[1].upper() in STAT_CODES:
         return 'total' if code[1].isupper() else 'base'
     return None
@@ -103,32 +125,36 @@ def compare(lhs, op, rhs):
     }[op]
 
 
-def evaluate(tree, total_stats, base_stats, set_bonus_count):
-    """Evaluates a parsed condition against final stats. Unmodelled atoms are considered satisfied."""
+def evaluate(tree, total_stats, base_stats, set_bonus_count, breed=None):
+    """Evaluates a parsed condition against final stats. Unmodelled atoms are considered satisfied,
+    as well as class conditions when no class (breed) is given."""
     if tree is None:
         return True
     kind = tree[0]
-    if kind == 'and':
-        return all(evaluate(c, total_stats, base_stats, set_bonus_count) for c in tree[1])
-    if kind == 'or':
-        return any(evaluate(c, total_stats, base_stats, set_bonus_count) for c in tree[1])
+    if kind in ('and', 'or'):
+        results = (evaluate(c, total_stats, base_stats, set_bonus_count, breed) for c in tree[1])
+        return all(results) if kind == 'and' else any(results)
 
     _, code, op, value = tree
     atom = atom_kind(code)
-    if atom is None or op == '~':
+    if atom is None or op == '~' or (atom == 'class' and breed is None):
         return True
     rhs = int(value)
+    if atom == 'class':
+        return compare(breed, op, rhs)
     if atom == 'set_bonus':
         return compare(set_bonus_count, op, rhs)
     stats = total_stats if atom == 'total' else base_stats
     return compare(stats.get(atom_char(code), 0), op, rhs)
 
 
-def unmodelled_atoms(tree):
-    """Atoms of a condition that cannot be checked from characteristics (jobs, quests, class...)."""
+def unmodelled_atoms(tree, breed=None):
+    """Atoms of a condition that are not checked (jobs, quests, class when unknown...)."""
     if tree is None:
         return []
     if tree[0] in ('and', 'or'):
-        return [atom for child in tree[1] for atom in unmodelled_atoms(child)]
+        return [atom for child in tree[1] for atom in unmodelled_atoms(child, breed)]
     _, code, op, value = tree
-    return [f"{code}{op}{value}"] if atom_kind(code) is None or op == '~' else []
+    kind = atom_kind(code)
+    unchecked = kind is None or op == '~' or (kind == 'class' and breed is None)
+    return [f"{code}{op}{value}"] if unchecked else []
