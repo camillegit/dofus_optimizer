@@ -1,12 +1,11 @@
 import pandas as pd
-from .config import DATA_DIR
+from .config import DATA_DIR, EQUIP_TYPES, PROCESSED_DIR
 
 def preprocess_items():
     """
     This function preprocesses the items data by filtering and cleaning it.
     """
-    items_path = DATA_DIR / "dofus_items.parquet"
-    processed_items_path = DATA_DIR / "dofus_items_processed.parquet"
+    processed_items_path = PROCESSED_DIR / "dofus_items_processed.parquet"
 
     items_files = sorted(DATA_DIR.glob("dofus_items*.parquet"))
 
@@ -20,14 +19,8 @@ def preprocess_items():
     # Remove duplicates
     df = df.drop_duplicates(subset="id")
 
-    # Filter for specific equipment types
-    equip_types = [16, 17, 9, 1, 3, 11, 10, 7, 4, 2, 5, 6, 19, 22, 8, 151, 23, 82]
-    #["Chapeau", "Cape", "Anneau", "Amulette", "Baguette", "Bottes", "Ceinture", "Marteau", "Bâton", "Arc", "Dague", "Épée", "Hache", "Faux", "Pelle", "Trophée", "Dofus", "Boucliers"]
-    df = df[df["type"].isin(equip_types)]
-
-    # Drop banned items
-    to_drop = ['2155', '8575', '27265', '27266', '27267', '27268', '27278', '27280', '27282', '27284', '9031']
-    df = df[~df['id'].isin(to_drop)]
+    # Filter for equipment types (banned items are filtered by the optimizer)
+    df = df[df["type"].isin(EQUIP_TYPES)]
 
     df.to_parquet(processed_items_path, index=False)
     print(f"Processed items saved to: {processed_items_path}")
@@ -36,8 +29,7 @@ def preprocess_panos():
     """
     This function preprocesses the panos data by calculating incremental bonuses.
     """
-    panos_path = DATA_DIR / "dofus_panos.parquet"
-    processed_panos_path = DATA_DIR / "dofus_panos_processed.parquet"
+    processed_panos_path = PROCESSED_DIR / "dofus_panos_processed.parquet"
 
     panos_files = sorted(DATA_DIR.glob("dofus_panos*.parquet"))
 

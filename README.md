@@ -17,13 +17,15 @@ pip install -r requirements.txt
 
 ### 1. Préparation des données (optionnel)
 
-Les fichiers de données nécessaires sont déjà inclus dans le répertoire `data/processed`. Si vous souhaitez les régénérer, vous pouvez exécuter les scripts suivants dans l'ordre :
+Les fichiers de données nécessaires sont déjà inclus dans le répertoire `data/processed`. Si vous souhaitez les régénérer (quelques secondes, via l'API paginée de DofusDB), vous pouvez exécuter les scripts suivants dans l'ordre :
 
 ```bash
-python3 -m src.items_extract --max-item 50000
-python3 -m src.pano_extract --max-pano 1500
+python3 -m src.items_extract
+python3 -m src.pano_extract
 python3 -m src.preprocess
 ```
+
+Les extractions brutes sont écrites dans `data/extracted/` (non versionné) et les fichiers prêts à l'emploi dans `data/processed/`. Les conditions d'équipement (`criterions`) sont extraites dans la colonne `condition`.
 
 ### 2. Lancer l'optimiseur
 

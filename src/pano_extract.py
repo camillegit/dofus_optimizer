@@ -1,8 +1,10 @@
-import pandas as pd
-from tqdm import tqdm
-from .utils import fetch_json
-from .config import BASE_URL_PANOS, DATA_DIR, MAX_PANO
 from datetime import datetime
+
+import pandas as pd
+
+from .config import BASE_URL_PANOS, DATA_DIR
+from .utils import fetch_all
+
 
 def parse_pano_data(item_set: dict) -> dict | None:
     """Parse a pano JSON object into a structured dictionary."""
@@ -19,7 +21,7 @@ def parse_pano_data(item_set: dict) -> dict | None:
         if sub_item.get("id"):
             entry[f"item_{i}"] = sub_item["id"]
 
-    # Parse effects by equipped item count
+    # Parse effects by equipped item count (effects[0] is the 1-item tier, values are cumulative)
     for i, effects_group in enumerate(item_set.get("effects", []), start=1):
         for eff in effects_group:
             charac = eff.get("characteristic")
@@ -30,33 +32,19 @@ def parse_pano_data(item_set: dict) -> dict | None:
     return entry
 
 
-def extract_panos(start_id: int = 0, end_id: int = MAX_PANO):
-    """Fetch and parse all pano data within ID range."""
-    all_panos = []
+def extract_panos():
+    """Fetch and parse all panos (paginated API)."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = DATA_DIR / f"dofus_panos_{timestamp}.parquet"
-    successful_panos_count = 0
 
-    print(f"Starting extraction for panos ({start_id} → {end_id})")
+    raw_panos = fetch_all(BASE_URL_PANOS, desc="Fetching Panos")
+    all_panos = [entry for entry in map(parse_pano_data, raw_panos) if entry]
 
-    for pano_id in tqdm(range(start_id, end_id), desc="Fetching Panos"):
-        data = fetch_json(BASE_URL_PANOS + str(pano_id))
-        pano_entry = parse_pano_data(data)
-        if pano_entry:
-            all_panos.append(pano_entry)
-            successful_panos_count += 1
-
-
-    # Save final data
     if all_panos:
-        df = pd.DataFrame(all_panos)
-        df.to_parquet(output_path, index=False)
-    print(f"Saved {successful_panos_count} panos to {output_path}")
+        pd.DataFrame(all_panos).to_parquet(output_path, index=False)
+    print(f"Saved {len(all_panos)} panos to {output_path}")
+
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--max-pano", type=int, default=MAX_PANO)
-    args = parser.parse_args()
-    extract_panos(end_id=args.max_pano)
+    extract_panos()

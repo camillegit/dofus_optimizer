@@ -1,8 +1,10 @@
-import pandas as pd
-from tqdm import tqdm
-from .utils import fetch_json
-from .config import BASE_URL_ITEMS, DATA_DIR, MAX_ITEM
 from datetime import datetime
+
+import pandas as pd
+
+from .config import BASE_URL_ITEMS, DATA_DIR, EQUIP_TYPES
+from .utils import fetch_all
+
 
 def parse_item_data(item: dict) -> dict | None:
     """Parse an item JSON object into a structured dictionary."""
@@ -15,7 +17,8 @@ def parse_item_data(item: dict) -> dict | None:
         "type": item.get("typeId"),
         "niveau": item.get("level"),
         "pano": item.get("itemSetId"),
-        "condition": item.get("criterions"),
+        "condition": item.get("criterions") or None,
+        "deux_mains": bool(item.get("twoHanded")),
     }
 
     # Iterate over each effect in the 'effects' list
@@ -26,39 +29,25 @@ def parse_item_data(item: dict) -> dict | None:
 
         # Check if both 'from' and 'to' exist, then take the max of both
         if characteristic is not None and from_value is not None and to_value is not None:
-            highest_value = max(from_value, to_value)
-            # Create a key based on the characteristic value and set its value to the highest of 'from' and 'to'
-            entry[f"characteristic_{characteristic}"] = highest_value
-    
+            entry[f"characteristic_{characteristic}"] = max(from_value, to_value)
+
     return entry
 
 
-def extract_items(start_id: int = 0, end_id: int = MAX_ITEM):
-    """Fetch and parse all item data within ID range."""
-    all_items = []
+def extract_items(types=EQUIP_TYPES):
+    """Fetch and parse all equipment items (paginated API, filtered by type)."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = DATA_DIR / f"dofus_items_{timestamp}.parquet"
-    successful_items_count = 0
 
-    print(f"Starting extraction for items ({start_id} → {end_id})")
+    params = [("typeId[$in][]", t) for t in types]
+    raw_items = fetch_all(BASE_URL_ITEMS, params, desc="Fetching Items")
+    all_items = [entry for entry in map(parse_item_data, raw_items) if entry]
 
-    for item_id in tqdm(range(start_id, end_id), desc="Fetching Items"):
-        data = fetch_json(BASE_URL_ITEMS + str(item_id))
-        item_entry = parse_item_data(data)
-        if item_entry:
-            all_items.append(item_entry)
-            successful_items_count += 1
-
-    # Save final data
     if all_items:
-        df = pd.DataFrame(all_items)
-        df.to_parquet(output_path, index=False)
-    print(f"Saved {successful_items_count} items to {output_path}")
+        pd.DataFrame(all_items).to_parquet(output_path, index=False)
+    print(f"Saved {len(all_items)} items to {output_path}")
+
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--max-item", type=int, default=MAX_ITEM)
-    args = parser.parse_args()
-    extract_items(end_id=args.max_item)
+    extract_items()
