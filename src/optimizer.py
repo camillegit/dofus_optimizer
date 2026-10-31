@@ -1,293 +1,221 @@
-import pandas as pd
-from pulp import LpMaximize, LpProblem, LpVariable, lpSum
-import re
 import argparse
-import glob
-from pathlib import Path
+import re
+import sys
 from collections import defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import pandas as pd
+from pulp import LpMaximize, LpProblem, LpStatus, LpVariable, PULP_CBC_CMD, lpSum
+
+DATA_PROCESSED_DIR = Path(__file__).resolve().parent.parent / 'data' / 'processed'
+
+CHAR_ID_TO_NAME = {
+    -1: "dommages Neutre", 10: "Force", 88: "Dommages Terre", 11: "Vitalité",
+    92: "Dommages Neutre", 15: "Intelligence", 78: "Fuite", 0: "Arme de chasse",
+    18: "% Critique", 14: "Agilité", 79: "Tacle", 23: "PM", 49: "Soins",
+    91: "Dommages Air", 12: "Sagesse", 13: "Chance", 48: "Prospection",
+    90: "Dommages Eau", 1: "PA", 44: "Initiative", 19: "Portée",
+    89: "Dommages Feu", 16: "Dommages", 25: "Puissance", 86: "Dommages Critiques",
+    87: "Résistances Critiques", 33: "% Résistance Terre", 26: "Invocations",
+    84: "Dommages Poussée", 37: "% Résistance Neutre", 82: "Retrait PA",
+    83: "Retrait PM", 34: "% Résistance Feu", 35: "% Résistance Eau",
+    36: "% Résistance Air", 58: "Résistances Neutre", 54: "Résistances Terre",
+    55: "Résistances Feu", 56: "Résistances Eau", 57: "Résistances Air",
+    28: "Esquive PM", 85: "Résistances Poussée", 40: "Pods", 27: "Esquive PA",
+    69: "Puissance Pièges", 70: "Dommages Pièges", 50: "Dommages Renvoyés",
+    124: "% Résistance mêlée", 121: "% Résistance distance",
+    122: "Dommages d'armes", 123: "Dommages aux sorts"
+}
+
+EQUIP_TYPES_MAP = {
+    16: "Chapeau", 17: "Cape", 9: "Anneau", 1: "Amulette", 3: "Baguette",
+    11: "Bottes", 10: "Ceinture", 7: "Marteau", 4: "Bâton", 2: "Arc",
+    5: "Dague", 6: "Épée", 19: "Hache", 22: "Faux", 8: "Pelle",
+    151: "Trophée", 23: "Dofus", 82: "Boucliers"
+}
+
+WEAPON_TYPES = [3, 7, 4, 2, 5, 6, 19, 22, 8]
+DOFUS_TROPHY_TYPES = [151, 23]
+RING_TYPE = 9
+DOFUS_TYPE = 23
+
+BANNED_ITEMS = [2155, 8575, 27265, 27266, 27267, 27268, 27278, 27280, 27282, 9031, 2447, 6713]
+
+PA, PM = 'characteristic_1', 'characteristic_23'
 
 
-def load_data():
+def load_data(data_dir=DATA_PROCESSED_DIR):
     """Loads items and panoplies data from the data/processed directory."""
-    
-    # Get the directory of the current script
-    script_dir = Path(__file__).parent
-    
-    # Construct the path to the data/processed directory relative to the script
-    data_processed_dir = script_dir.parent / 'data' / 'processed'
-    
-    items_df = pd.read_parquet(data_processed_dir / 'dofus_items_processed.parquet')
-    bonuses_df = pd.read_parquet(data_processed_dir / 'dofus_panos_processed.parquet')
+    items_df = pd.read_parquet(Path(data_dir) / 'dofus_items_processed.parquet')
+    bonuses_df = pd.read_parquet(Path(data_dir) / 'dofus_panos_processed.parquet')
 
-    # Replace NaN values with 0
-    items_df.fillna(0, inplace=True)
-    bonuses_df.fillna(0, inplace=True)
-    
+    # Replace NaN values with 0 (except the textual condition column)
+    num_cols = items_df.columns.difference(['nom', 'condition'])
+    items_df[num_cols] = items_df[num_cols].fillna(0)
+    bonuses_df = bonuses_df.fillna(0)
     return items_df, bonuses_df
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Dofus Stuff Optimizer')
-    parser.add_argument('--min-level', type=int, default=1, help='Minimum character level')
-    parser.add_argument('--max-level', type=int, default=200, help='Maximum character level')
-    parser.add_argument('--pa', type=int, default=9, help='Desired PA')
-    parser.add_argument('--pm', type=int, default=4, help='Desired PM')
-    parser.add_argument('--no-dofus', action='store_true', help='Exclude Dofus and Trophies')
-    parser.add_argument('--weights', nargs='+', default=[], help='List of characteristics and weights (e.g., characteristic_13:1.0)')
-    parser.add_argument('--base-stats', nargs='+', default=[], help='Base stats overrides (e.g., characteristic_1:7 characteristic_23:3)')
-    parser.add_argument('--debug-pa-pm', action='store_true', help='Print PA/PM contributions (items, set bonuses, base)')
-    parser.add_argument('--min-stats', nargs='+', default=[], help='Minimum stats constraints (e.g., characteristic_10:100 characteristic_13:300)')
-    
-    args = parser.parse_args()
-    
-    print("Loading data...")
-    items_df, bonuses_df = load_data()
-    print("Data loaded.")
-
-    # Step 1: Filter items by level
-    items_df = items_df[(items_df['niveau'] >= args.min_level) & (items_df['niveau'] <= args.max_level)]
-
-    # Filter out banned items
-    to_drop = [2155, 8575, 27265, 27266, 27267, 27268, 27278, 27280, 27282, 9031, 2447, 6713] 
-    items_df = items_df[~items_df['id'].isin(to_drop)]
-    if args.no_dofus:
-        items_df = items_df[items_df['type'] != 23]
-
-    # Step 2: Define ILP variables
-    item_vars = {row['id']: LpVariable(f"item_{row['id']}", cat='Binary') for _, row in items_df.iterrows()}
-
-    bonus_vars = {}
-    unique_panos = items_df['pano'].unique()
-    
-    # Filter panos that are in bonuses_df
-    valid_pano_ids = bonuses_df['id'].unique()
-    filtered_panos = [pano for pano in unique_panos if pano != -1 and pano in valid_pano_ids]
-
-    for set_id in filtered_panos:
-        count = items_df[items_df['pano'] == set_id].shape[0]
-        if count >= 2:
-            for k in range(2, count + 1):
-                bonus_vars[set_id, k] = LpVariable(f"bonus_{set_id}_{k}", cat='Binary')
-
-    # Step 3: Create the ILP problem
-    problem = LpProblem("Optimal_Stuff_Combination", LpMaximize)
-
-    # Step 4: Constraints on types
-    type_groups = items_df.groupby('type')
-    for item_type, group in type_groups:
-        limit = 1
-        if item_type == 9:
-            limit = 2
-        elif item_type in [151, 23]:
-            limit = 6
-        elif item_type in [3, 7, 4, 2, 5, 6, 19, 22, 8]:
+def parse_stat_list(raw_list):
+    """Parses ['characteristic_10:200', 'characteristic_13=100'] into a dict."""
+    parsed = {}
+    for raw in raw_list:
+        if ':' in raw:
+            key, value = raw.split(':', 1)
+        elif '=' in raw:
+            key, value = raw.split('=', 1)
+        else:
             continue
-
-        problem += lpSum(item_vars[item_id] for item_id in group['id']) <= limit, f"Type_{item_type}_Constraint"
-
-    grouped_types = [3, 7, 4, 2, 5, 6, 19, 22, 8]
-    item_types = items_df.set_index('id')['type'].to_dict()
-    grouped_items = [item_id for item_id, item_type in item_types.items() if item_type in grouped_types]
-    problem += lpSum(item_vars[item_id] for item_id in grouped_items) <= 1, "Grouped_Types_Constraint"
-
-    # Combined cap for Dofus + Trophies
-    dofus_trophy_types = [151, 23]
-    dofus_trophy_items = [item_id for item_id, item_type in item_types.items() if item_type in dofus_trophy_types]
-    problem += lpSum(item_vars[item_id] for item_id in dofus_trophy_items) <= 6, "Dofus_Trophy_Combined_Constraint"
-
-    # Step 5: Constraints on bonuses
-    for set_id in filtered_panos:
-        count = items_df[items_df['pano'] == set_id].shape[0]
-        if count >= 2:
-            id_values = items_df[items_df['pano'] == set_id]['id'].tolist()
-            for k in range(2, count + 1):
-                problem += bonus_vars[(set_id, k)] <= lpSum(item_vars[item_id] for item_id in id_values) / k, f"Bonus_{set_id}_{k}_Constraint"
-    
-    # Step 6: Parse weights
-    characteristics_of_interest = [w.split(':')[0] for w in args.weights]
-    weights = [float(w.split(':')[1]) for w in args.weights]
-
-    # Step 7: Calculate weighted characteristics for items
-    item_characteristics = {
-        item_id: sum(row[char] * weight for char, weight in zip(characteristics_of_interest, weights))
-        for item_id, row in items_df.set_index('id').iterrows()
-    }
-
-    # Step 8: Calculate weighted characteristics for bonuses
-    bonus_characteristics = {}
-    for set_id in filtered_panos :
-        count = items_df[items_df['pano'] == set_id].shape[0]
-        if count >= 2:
-            for k in range(2, count + 1):
-                row = bonuses_df[bonuses_df['id'] == set_id]
-                if not row.empty:
-                    weighted_sum = 0
-                    for characteristic, weight in zip(characteristics_of_interest, weights):
-                        column_name = f"bonus_{k}_{characteristic}"
-                        if column_name in bonuses_df.columns:
-                            value = row[column_name].iloc[0]
-                            weighted_sum += value * weight
-                
-                    key = (set_id, k)
-                    bonus_characteristics[key] = weighted_sum
-    
-    # Step 9: Base stats
-    def parse_base_stats(raw_list):
-        parsed = {}
-        for raw in raw_list:
-            if ':' in raw:
-                key, value = raw.split(':', 1)
-            elif '=' in raw:
-                key, value = raw.split('=', 1)
-            else:
-                continue
-            key = key.strip()
-            value = value.strip()
-            if not key:
-                continue
-            try:
-                parsed[key] = float(value)
-            except ValueError:
-                continue
-        return parsed
-
-    base_stats = parse_base_stats(args.base_stats)
-
-    if 'characteristic_1' not in base_stats:
-        base_stats['characteristic_1'] = 7 if args.max_level >= 100 else 6
-    if 'characteristic_23' not in base_stats:
-        base_stats['characteristic_23'] = 3
-
-    # Step 10: Generic minimum stat constraints (PA/PM + user-provided)
-    def build_min_stat_constraint(problem_obj, char, minimum, label):
-        item_characteristics = {
-            item_id: row[char]
-            for item_id, row in items_df.set_index('id').iterrows()
-        }
-
-        bonus_characteristics = {}
-        for set_id in filtered_panos:
-            count = items_df[items_df['pano'] == set_id].shape[0]
-            if count >= 2:
-                for k in range(2, count + 1):
-                    row_bonus = bonuses_df[bonuses_df['id'] == set_id]
-                    if row_bonus.empty:
-                        continue
-                    col_name = f"bonus_{k}_{char}"
-                    if col_name in bonuses_df.columns:
-                        bonus_characteristics[(set_id, k)] = row_bonus[col_name].iloc[0]
-
-        problem_obj += (
-            lpSum(
-                item_vars[item_id] * item_characteristics.get(item_id, 0)
-                for item_id in item_vars
-            ) +
-            lpSum(
-                bonus_vars[key] * bonus_characteristics.get(key, 0)
-                for key in bonus_vars
-            ) + base_stats.get(char, 0) >= minimum, label
-        )
-
-    # Keep --pa and --pm (PA/PM)
-    build_min_stat_constraint(problem, "characteristic_1", args.pa, "Minimum_PA_Constraint")
-    build_min_stat_constraint(problem, "characteristic_23", args.pm, "Minimum_PM_Constraint")
-
-    # Additional minimum stats (exclude PA/PM)
-    min_stats = parse_base_stats(args.min_stats)
-    for char, minimum in min_stats.items():
-        if char in ("characteristic_1", "characteristic_23"):
+        key = key.strip()
+        if not key:
             continue
-        if char not in items_df.columns:
+        try:
+            parsed[key] = float(value.strip())
+        except ValueError:
             continue
-        build_min_stat_constraint(problem, char, minimum, f"Minimum_{char}_Constraint")
-    
-    # Step 12: Condition parsing and constraints
-    table_1 = ['W', 'S', 'C', 'A', 'I', 'P', 'M', 'V']
-    table_2 = ['characteristic_12', 'characteristic_10', 'characteristic_13', 'characteristic_14', 'characteristic_15', 'characteristic_1', 'characteristic_23', 'characteristic_11']
-    code_to_char = dict(zip(table_1, table_2))
+    return parsed
 
-    c_condition_regex = re.compile(r'\b(C[A-Za-z0-9]*)\s*(<=|>=|=|<|>)\s*([0-9]+)\b')
-    pk_condition_regex = re.compile(r'\b(Pk)\s*(<=|>=|=|<|>)\s*([0-9]+)\b')
 
-    def extract_conditions(condition_str):
-        if not isinstance(condition_str, str):
-            return []
-        normalized = condition_str.replace("|", "&")
-        c_matches = c_condition_regex.findall(normalized)
-        pk_matches = pk_condition_regex.findall(normalized)
-        return [f"{var}{op}{val}" for var, op, val in c_matches + pk_matches]
+@dataclass
+class Options:
+    min_level: int = 1
+    max_level: int = 200
+    pa: int = 9
+    pm: int = 4
+    no_dofus: bool = False
+    weights: dict = field(default_factory=dict)
+    base_stats: dict = field(default_factory=dict)
+    min_stats: dict = field(default_factory=dict)
 
-    unique_conditions = set()
-    condition_to_items = defaultdict(set)
-    for _, row in items_df.iterrows():
-        item_id = row['id']
-        condition_str = row.get('condition', '')
-        conditions = extract_conditions(condition_str)
-        for cond in conditions:
-            unique_conditions.add(cond)
-            condition_to_items[cond].add(item_id)
 
-    unique_conditions = sorted(unique_conditions)
-    condition_to_items = {cond: sorted(ids) for cond, ids in condition_to_items.items()}
+@dataclass
+class Model:
+    problem: LpProblem
+    items: pd.DataFrame          # filtered items, indexed by id
+    bonuses: pd.DataFrame        # panoplies, indexed by id
+    item_vars: dict
+    bonus_vars: dict             # (set_id, k) -> var
+    base_stats: dict
 
-    stat_cond_regex = re.compile(r'^C([A-Za-z0-9]+)(<=|>=|=|<|>)(\d+)$')
-    pk_cond_regex = re.compile(r'^(Pk)(<=|>=|=|<|>)(\d+)$')
+    def item_stat(self, char):
+        if char not in self.items.columns:
+            return {}
+        return self.items[char].to_dict()
 
-    item_stat = {
-        char: items_df.set_index('id')[char].to_dict()
-        for char in table_2 if char in items_df.columns
-    }
-
-    bonus_stat = {char: {} for char in table_2}
-    for (set_id, k) in bonus_vars:
-        row = bonuses_df[bonuses_df['id'] == set_id]
-        if row.empty:
-            continue
-        for char in table_2:
+    def bonus_stat(self, char):
+        """(set_id, k) -> value of the bonus column for that tier."""
+        values = {}
+        for (set_id, k) in self.bonus_vars:
             col = f"bonus_{k}_{char}"
-            if col in bonuses_df.columns:
-                bonus_stat[char][(set_id, k)] = row[col].iloc[0]
+            if col in self.bonuses.columns:
+                values[(set_id, k)] = self.bonuses.at[set_id, col]
+        return values
 
-    def total_stat_expr(char):
+    def total_stat_expr(self, char):
+        item_stat = self.item_stat(char)
+        bonus_stat = self.bonus_stat(char)
         return (
-            lpSum(item_vars[i] * item_stat[char].get(i, 0) for i in item_vars)
-            + lpSum(bonus_vars[key] * bonus_stat[char].get(key, 0) for key in bonus_vars)
-            + base_stats.get(char, 0)
+            lpSum(var * item_stat.get(i, 0) for i, var in self.item_vars.items())
+            + lpSum(var * bonus_stat.get(key, 0) for key, var in self.bonus_vars.items())
+            + self.base_stats.get(char, 0)
         )
 
-    def big_m(char):
-        total_abs = sum(abs(v) for v in item_stat[char].values())
-        total_abs += sum(abs(v) for v in bonus_stat[char].values())
-        total_abs += abs(base_stats.get(char, 0))
+    def big_m(self, char):
+        total_abs = sum(abs(v) for v in self.item_stat(char).values())
+        total_abs += sum(abs(v) for v in self.bonus_stat(char).values())
+        total_abs += abs(self.base_stats.get(char, 0))
         return max(100, total_abs + 100)
 
-    z_vars = {cond: LpVariable(f"z_{idx}", cat='Binary') for idx, cond in enumerate(unique_conditions)}
 
-    for cond in unique_conditions:
-        stat_match = stat_cond_regex.match(cond)
-        pk_match = pk_cond_regex.match(cond)
-        z = z_vars[cond]
+def filter_items(items_df, opts):
+    items_df = items_df[(items_df['niveau'] >= opts.min_level) & (items_df['niveau'] <= opts.max_level)]
+    items_df = items_df[~items_df['id'].isin(BANNED_ITEMS)]
+    if opts.no_dofus:
+        items_df = items_df[items_df['type'] != DOFUS_TYPE]
+    return items_df
+
+
+def add_slot_constraints(model):
+    problem, items = model.problem, model.items
+    for item_type, group in items.groupby('type'):
+        if item_type in WEAPON_TYPES:
+            continue
+        limit = 1
+        if item_type == RING_TYPE:
+            limit = 2
+        elif item_type in DOFUS_TROPHY_TYPES:
+            limit = 6
+        problem += lpSum(model.item_vars[i] for i in group.index) <= limit, f"Type_{item_type}_Constraint"
+
+    weapons = items.index[items['type'].isin(WEAPON_TYPES)]
+    problem += lpSum(model.item_vars[i] for i in weapons) <= 1, "Grouped_Types_Constraint"
+
+    dofus_trophies = items.index[items['type'].isin(DOFUS_TROPHY_TYPES)]
+    problem += lpSum(model.item_vars[i] for i in dofus_trophies) <= 6, "Dofus_Trophy_Combined_Constraint"
+
+
+def add_set_bonus_constraints(model):
+    for (set_id, k), var in model.bonus_vars.items():
+        members = model.items.index[model.items['pano'] == set_id]
+        model.problem += var <= lpSum(model.item_vars[i] for i in members) / k, f"Bonus_{set_id}_{k}_Constraint"
+
+
+def add_min_stat_constraints(model, opts):
+    model.problem += model.total_stat_expr(PA) >= opts.pa, "Minimum_PA_Constraint"
+    model.problem += model.total_stat_expr(PM) >= opts.pm, "Minimum_PM_Constraint"
+    for char, minimum in opts.min_stats.items():
+        if char in (PA, PM) or char not in model.items.columns:
+            continue
+        model.problem += model.total_stat_expr(char) >= minimum, f"Minimum_{char}_Constraint"
+
+
+CONDITION_CODE_TO_CHAR = {
+    'W': 'characteristic_12', 'S': 'characteristic_10', 'C': 'characteristic_13',
+    'A': 'characteristic_14', 'I': 'characteristic_15', 'P': 'characteristic_1',
+    'M': 'characteristic_23', 'V': 'characteristic_11',
+}
+C_CONDITION_REGEX = re.compile(r'\b(C[A-Za-z0-9]*)\s*(<=|>=|=|<|>)\s*([0-9]+)\b')
+PK_CONDITION_REGEX = re.compile(r'\b(Pk)\s*(<=|>=|=|<|>)\s*([0-9]+)\b')
+STAT_COND_REGEX = re.compile(r'^C([A-Za-z0-9]+)(<=|>=|=|<|>)(\d+)$')
+PK_COND_REGEX = re.compile(r'^(Pk)(<=|>=|=|<|>)(\d+)$')
+
+
+def extract_conditions(condition_str):
+    if not isinstance(condition_str, str):
+        return []
+    normalized = condition_str.replace("|", "&")
+    c_matches = C_CONDITION_REGEX.findall(normalized)
+    pk_matches = PK_CONDITION_REGEX.findall(normalized)
+    return [f"{var}{op}{val}" for var, op, val in c_matches + pk_matches]
+
+
+def add_condition_constraints(model):
+    problem = model.problem
+    condition_to_items = defaultdict(set)
+    for item_id, condition_str in model.items['condition'].items():
+        for cond in extract_conditions(condition_str):
+            condition_to_items[cond].add(item_id)
+
+    for idx, cond in enumerate(sorted(condition_to_items)):
+        stat_match = STAT_COND_REGEX.match(cond)
+        pk_match = PK_COND_REGEX.match(cond)
+        z = LpVariable(f"z_{idx}", cat='Binary')
 
         if stat_match:
             code, op, value_str = stat_match.groups()
-            if code not in code_to_char:
+            char = CONDITION_CODE_TO_CHAR.get(code)
+            if char is None or char not in model.items.columns:
                 continue
-            char = code_to_char[code]
-            if char not in item_stat:
-                continue
-
             value = int(value_str)
-            total = total_stat_expr(char)
-            M = big_m(char)
-
+            total = model.total_stat_expr(char)
+            M = model.big_m(char)
             if op == '>':
-                rhs = value + 1
-                problem += total >= rhs - M * (1 - z), f"Cond_{cond}_min"
+                problem += total >= value + 1 - M * (1 - z), f"Cond_{cond}_min"
             elif op == '>=':
                 problem += total >= value - M * (1 - z), f"Cond_{cond}_min"
             elif op == '<':
-                rhs = value - 1
-                problem += total <= rhs + M * (1 - z), f"Cond_{cond}_max"
+                problem += total <= value - 1 + M * (1 - z), f"Cond_{cond}_max"
             elif op == '<=':
                 problem += total <= value + M * (1 - z), f"Cond_{cond}_max"
             elif op == '=':
@@ -299,15 +227,15 @@ def main():
             value = int(value_str)
 
             def bonuses_ge(threshold):
-                keys = [key for key in bonus_vars if key[1] >= threshold]
-                return lpSum(bonus_vars[key] for key in keys), max(1, len(keys))
+                keys = [key for key in model.bonus_vars if key[1] >= threshold]
+                return lpSum(model.bonus_vars[key] for key in keys), max(1, len(keys))
 
             if op == '<':
                 total, M = bonuses_ge(value)
-                problem += total <= 0 + M * (1 - z), f"Cond_{cond}_max"
+                problem += total <= M * (1 - z), f"Cond_{cond}_max"
             elif op == '<=':
                 total, M = bonuses_ge(value + 1)
-                problem += total <= 0 + M * (1 - z), f"Cond_{cond}_max"
+                problem += total <= M * (1 - z), f"Cond_{cond}_max"
             elif op == '>':
                 total, M = bonuses_ge(value + 1)
                 problem += total >= 1 - M * (1 - z), f"Cond_{cond}_min"
@@ -318,124 +246,160 @@ def main():
                 total_lo, M_lo = bonuses_ge(value)
                 total_hi, M_hi = bonuses_ge(value + 1)
                 problem += total_lo >= 1 - M_lo * (1 - z), f"Cond_{cond}_eq_min"
-                problem += total_hi <= 0 + M_hi * (1 - z), f"Cond_{cond}_eq_max"
-
+                problem += total_hi <= M_hi * (1 - z), f"Cond_{cond}_eq_max"
         else:
             continue
 
-        valid_items = [i for i in condition_to_items.get(cond, []) if i in item_vars]
-        if valid_items:
-            problem += lpSum(item_vars[i] for i in valid_items) <= z * len(valid_items), f"Cond_{cond}_items"
+        members = [i for i in condition_to_items[cond] if i in model.item_vars]
+        if members:
+            problem += lpSum(model.item_vars[i] for i in members) <= z * len(members), f"Cond_{cond}_items"
 
-    # Step 13: Define the objective function
-    problem += lpSum(
-        item_vars[item_id] * item_characteristics[item_id] for item_id in item_vars
-    ) + lpSum(
-        bonus_vars[key] * bonus_characteristics[key] for key in bonus_vars
-    ), "Total_Weighted_Stats"
 
-    # Step 12: Solve the problem
-    print("\nSolving the optimization problem...")
-    problem.solve()
-    print("Problem solved.")
+def weighted_objective(model, weights):
+    return lpSum(model.total_stat_expr(char) * w for char, w in weights.items()) \
+        - sum(model.base_stats.get(char, 0) * w for char, w in weights.items())
 
-    # Step 13: Print the results
+
+def build_model(items_df, bonuses_df, opts):
+    items = filter_items(items_df, opts).drop_duplicates('id').set_index('id', drop=False)
+    bonuses = bonuses_df.drop_duplicates('id').set_index('id', drop=False)
+
+    item_vars = {i: LpVariable(f"item_{i}", cat='Binary') for i in items.index}
+
+    bonus_vars = {}
+    set_sizes = items[items['pano'] != -1].groupby('pano').size()
+    for set_id, count in set_sizes.items():
+        if set_id not in bonuses.index:
+            continue
+        for k in range(2, count + 1):
+            bonus_vars[set_id, k] = LpVariable(f"bonus_{set_id}_{k}", cat='Binary')
+
+    base_stats = dict(opts.base_stats)
+    base_stats.setdefault(PA, 7 if opts.max_level >= 100 else 6)
+    base_stats.setdefault(PM, 3)
+
+    model = Model(LpProblem("Optimal_Stuff_Combination", LpMaximize), items, bonuses,
+                  item_vars, bonus_vars, base_stats)
+    add_slot_constraints(model)
+    add_set_bonus_constraints(model)
+    add_min_stat_constraints(model, opts)
+    add_condition_constraints(model)
+    model.problem += weighted_objective(model, opts.weights), "Total_Weighted_Stats"
+    return model
+
+
+@dataclass
+class Result:
+    status: str
+    items: list = field(default_factory=list)       # selected item ids
+    bonuses: list = field(default_factory=list)     # selected (set_id, k)
+    stats: dict = field(default_factory=dict)       # char -> total value
+    objective: float = None
+
+
+def selected(var):
+    return var.value() is not None and var.value() > 0.5
+
+
+def solve(model, msg=False):
+    model.problem.solve(PULP_CBC_CMD(msg=msg))
+    status = LpStatus[model.problem.status]
+    if status != 'Optimal':
+        return Result(status)
+
+    result = Result(status, objective=model.problem.objective.value())
+    result.items = [i for i, var in model.item_vars.items() if selected(var)]
+    result.bonuses = [key for key, var in model.bonus_vars.items() if selected(var)]
+    return result
+
+
+def compute_stats(model, result, chars):
+    totals = {}
+    for char in chars:
+        item_stat = model.item_stat(char)
+        bonus_stat = model.bonus_stat(char)
+        totals[char] = (
+            sum(item_stat.get(i, 0) for i in result.items)
+            + sum(bonus_stat.get(key, 0) for key in result.bonuses)
+            + model.base_stats.get(char, 0)
+        )
+    return totals
+
+
+def stat_name(char):
+    return CHAR_ID_TO_NAME.get(int(char.split('_')[1]), char)
+
+
+def print_report(model, result, opts, debug_pa_pm=False):
+    if result.status != 'Optimal':
+        print(f"\nAucune solution trouvée (statut du solveur : {result.status}).")
+        return
+
     print("\nÉquipement optimal:")
-    
-    char_id_to_name = {
-        -1: "dommages Neutre", 10: "Force", 88: "Dommages Terre", 11: "Vitalité",
-        92: "Dommages Neutre", 15: "Intelligence", 78: "Fuite", 0: "Arme de chasse",
-        18: "% Critique", 14: "Agilité", 79: "Tacle", 23: "PM", 49: "Soins",
-        91: "Dommages Air", 12: "Sagesse", 13: "Chance", 48: "Prospection",
-        90: "Dommages Eau", 1: "PA", 44: "Initiative", 19: "Portée",
-        89: "Dommages Feu", 16: "Dommages", 25: "Puissance", 86: "Dommages Critiques",
-        87: "Résistances Critiques", 33: "% Résistance Terre", 26: "Invocations",
-        84: "Dommages Poussée", 37: "% Résistance Neutre", 82: "Retrait PA",
-        83: "Retrait PM", 34: "% Résistance Feu", 35: "% Résistance Eau",
-        36: "% Résistance Air", 58: "Résistances Neutre", 54: "Résistances Terre",
-        55: "Résistances Feu", 56: "Résistances Eau", 57: "Résistances Air",
-        28: "Esquive PM", 85: "Résistances Poussée", 40: "Pods", 27: "Esquive PA",
-        69: "Puissance Pièges", 70: "Dommages Pièges", 50: "Dommages Renvoyés",
-        124: "% Résistance mêlée", 121: "% Résistance distance",
-        122: "Dommages d'armes", 123: "Dommages aux sorts"
-    }
-
-    # Define stats to always display, plus the ones from the weights and base stats
-    stats_to_display = set(['characteristic_1', 'characteristic_23', 'characteristic_19'])
-    for char in characteristics_of_interest:
-        stats_to_display.add(char)
-    for char in base_stats.keys():
-        stats_to_display.add(char)
-
-    total_stats = {stat: 0 for stat in stats_to_display}
-
-    equip_types_map = {
-        16: "Chapeau", 17: "Cape", 9: "Anneau", 1: "Amulette", 3: "Baguette",
-        11: "Bottes", 10: "Ceinture", 7: "Marteau", 4: "Bâton", 2: "Arc",
-        5: "Dague", 6: "Épée", 19: "Hache", 22: "Faux", 8: "Pelle",
-        151: "Trophée", 23: "Dofus", 82: "Boucliers"
-    }
-
-    selected_items = []
-    for item_id, var in item_vars.items():
-        if var.value() == 1:
-            item_data = items_df[items_df['id'] == item_id].iloc[0]
-            selected_items.append(item_data)
-            item_type_id = item_data['type']
-            item_type_name = equip_types_map.get(item_type_id, "Unknown Type")
-            print(f"- Item ID: {item_id}, Nom: {item_data['nom']}, Type: {item_type_name}")
-            for char in stats_to_display:
-                if char in item_data:
-                    total_stats[char] += item_data[char]
+    for item_id in result.items:
+        item = model.items.loc[item_id]
+        print(f"- Item ID: {item_id}, Nom: {item['nom']}, Type: {EQUIP_TYPES_MAP.get(item['type'], 'Unknown Type')}")
 
     print("\nBonus panoplies:")
-    for (set_id, k), var in bonus_vars.items():
-        if var.value() == 1:
-            pano_data = bonuses_df[bonuses_df['id'] == set_id].iloc[0]
-            print(f"- Panoplie: {pano_data['nom']}, Niveau: {k}")
-            for char in stats_to_display:
-                col_name = f"bonus_{k}_{char}"
-                if col_name in pano_data:
-                    total_stats[char] += pano_data[col_name]
-    
+    for set_id, k in result.bonuses:
+        print(f"- Panoplie: {model.bonuses.at[set_id, 'nom']}, Niveau: {k}")
+
+    stats_to_display = [PA, PM, 'characteristic_19']
+    stats_to_display += [c for c in list(opts.weights) + list(model.base_stats) if c not in stats_to_display]
     print("\nStats totales:")
-    # Add base stats
-    for char, value in base_stats.items():
-        total_stats[char] = total_stats.get(char, 0) + value
-    
-    for char, value in total_stats.items():
-        char_id = int(char.split('_')[1])
-        char_name = char_id_to_name.get(char_id, char)
-        print(f"- {char_name}: {value}")
+    for char, value in compute_stats(model, result, stats_to_display).items():
+        print(f"- {stat_name(char)}: {value}")
 
-    if args.debug_pa_pm:
-        pa_items = sum(items_df[items_df['id'] == item_id].iloc[0]['characteristic_1']
-                       for item_id, var in item_vars.items() if var.value() == 1)
-        pm_items = sum(items_df[items_df['id'] == item_id].iloc[0]['characteristic_23']
-                       for item_id, var in item_vars.items() if var.value() == 1)
-
-        pa_bonus = 0
-        pm_bonus = 0
-        for (set_id, k), var in bonus_vars.items():
-            if var.value() == 1:
-                pano_data = bonuses_df[bonuses_df['id'] == set_id].iloc[0]
-                col_pa = f"bonus_{k}_characteristic_1"
-                col_pm = f"bonus_{k}_characteristic_23"
-                if col_pa in pano_data:
-                    pa_bonus += pano_data[col_pa]
-                if col_pm in pano_data:
-                    pm_bonus += pano_data[col_pm]
-
+    if debug_pa_pm:
         print("\nDebug PA/PM breakdown:")
-        print(f"- PA items: {pa_items}")
-        print(f"- PA set bonuses: {pa_bonus}")
-        print(f"- PA base: {base_stats.get('characteristic_1', 0)}")
-        print(f"- PA total: {pa_items + pa_bonus + base_stats.get('characteristic_1', 0)}")
-        print(f"- PM items: {pm_items}")
-        print(f"- PM set bonuses: {pm_bonus}")
-        print(f"- PM base: {base_stats.get('characteristic_23', 0)}")
-        print(f"- PM total: {pm_items + pm_bonus + base_stats.get('characteristic_23', 0)}")
+        for char, label in ((PA, 'PA'), (PM, 'PM')):
+            from_items = sum(model.item_stat(char).get(i, 0) for i in result.items)
+            from_sets = sum(model.bonus_stat(char).get(key, 0) for key in result.bonuses)
+            base = model.base_stats.get(char, 0)
+            print(f"- {label} items: {from_items}")
+            print(f"- {label} set bonuses: {from_sets}")
+            print(f"- {label} base: {base}")
+            print(f"- {label} total: {from_items + from_sets + base}")
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description='Dofus Stuff Optimizer')
+    parser.add_argument('--min-level', type=int, default=1, help='Minimum character level')
+    parser.add_argument('--max-level', type=int, default=200, help='Maximum character level')
+    parser.add_argument('--pa', type=int, default=9, help='Desired PA')
+    parser.add_argument('--pm', type=int, default=4, help='Desired PM')
+    parser.add_argument('--no-dofus', action='store_true', help='Exclude Dofus and Trophies')
+    parser.add_argument('--weights', nargs='+', default=[], help='List of characteristics and weights (e.g., characteristic_13:1.0)')
+    parser.add_argument('--base-stats', nargs='+', default=[], help='Base stats overrides (e.g., characteristic_1:7 characteristic_23:3)')
+    parser.add_argument('--debug-pa-pm', action='store_true', help='Print PA/PM contributions (items, set bonuses, base)')
+    parser.add_argument('--min-stats', nargs='+', default=[], help='Minimum stats constraints (e.g., characteristic_10:100 characteristic_13:300)')
+    parser.add_argument('--solver-log', action='store_true', help='Show the solver log')
+    return parser.parse_args(argv)
+
+
+def options_from_args(args):
+    return Options(
+        min_level=args.min_level, max_level=args.max_level, pa=args.pa, pm=args.pm,
+        no_dofus=args.no_dofus, weights=parse_stat_list(args.weights),
+        base_stats=parse_stat_list(args.base_stats), min_stats=parse_stat_list(args.min_stats),
+    )
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    opts = options_from_args(args)
+
+    print("Loading data...")
+    items_df, bonuses_df = load_data()
+    print("Data loaded.")
+
+    model = build_model(items_df, bonuses_df, opts)
+    print("\nSolving the optimization problem...")
+    result = solve(model, msg=args.solver_log)
+    print("Problem solved.")
+    print_report(model, result, opts, debug_pa_pm=args.debug_pa_pm)
+    return 0 if result.status == 'Optimal' else 1
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

@@ -6,4 +6,4 @@ tqdm
 tabulate
 openpyxl
 click
-pulp
+pulppytest

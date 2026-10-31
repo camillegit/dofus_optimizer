@@ -47,6 +47,16 @@ Cette commande recherche l'équipement optimal pour un personnage jusqu'au nivea
 * `--weights` : Liste des caractéristiques et de leurs poids à optimiser. Par exemple, `characteristic_10:1.0` pour la Force avec un poids de 1.0.
 * `--base-stats` : Stats de base ajoutées au personnage (ex. `characteristic_10:200 characteristic_13:100`). Ces stats sont prises en compte pour les conditions et les totaux affichés.
 * `--min-stats` : Contraintes de stats minimales additionnelles (ex. `characteristic_10:100 characteristic_13:300`). PA/PM sont exclus ici, utilisez `--pa` et `--pm` pour cela.
+* `--debug-pa-pm` : Affiche le détail des PA/PM (items, bonus de panoplie, base).
+* `--solver-log` : Affiche le journal du solveur.
+
+Si aucune combinaison ne respecte les contraintes, le programme l'indique (statut du solveur) et retourne un code d'erreur.
+
+### 3. Tests
+
+```bash
+pytest
+```
 
 ## Caractéristiques disponibles
 
