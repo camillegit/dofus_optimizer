@@ -240,15 +240,43 @@ def set_objective(model, grads, extra_weights):
 
 
 def optimize_damage(model, spells, min_pa, targets=None, extra_weights=None, iterations=8, patience=2,
-                    solver='cbc'):
+                    solver='cbc', starts=None, seeds=None):
     """Sequential linearization of the expected rotation damage. Returns the best DamageResult.
 
     The gradient is taken halfway between the previous linearization point and the new stuff
     (damping against oscillations); stops after `patience` iterations without improvement.
+    Several starting points (characteristics of a reference stuff, e.g. the best single-element
+    stuffs for a multi-element search) can be given; the best stuff over all runs is returned.
+    `seeds` are item lists evaluated as such (characteristic points and exos re-optimized).
     """
-    targets = targets or [Target()]
-    extra_weights = extra_weights or {}
-    stats = dict(model.base_stats)
+    best = None
+    for items in (seeds or []):
+        current = _evaluate_fixed(model, spells, min_pa, targets or [Target()], extra_weights or {}, solver, items)
+        if current is not None and (best is None or current.damage > best.damage):
+            best = current
+    for start in (starts or [{}]):
+        current = _optimize_from(model, spells, min_pa, targets or [Target()], extra_weights or {},
+                                 iterations, patience, solver, start)
+        if current is not None and (best is None or current.damage > best.damage):
+            best = current
+    return best
+
+
+def _evaluate_fixed(model, spells, min_pa, targets, extra_weights, solver, items):
+    """Best rotation damage of a given set of items (other decisions re-optimized once)."""
+    fixed = set(items)
+    saved = {i: (var.lowBound, var.upBound) for i, var in model.item_vars.items()}
+    for i, var in model.item_vars.items():
+        var.lowBound = var.upBound = 1 if i in fixed else 0
+    try:
+        return _optimize_from(model, spells, min_pa, targets, extra_weights, 2, 1, solver, {})
+    finally:
+        for i, var in model.item_vars.items():
+            var.lowBound, var.upBound = saved[i]
+
+
+def _optimize_from(model, spells, min_pa, targets, extra_weights, iterations, patience, solver, start):
+    stats = {**model.base_stats, **start}
     best, stall = None, 0
     for _ in range(iterations):
         grads = []

@@ -80,6 +80,20 @@ Si aucune combinaison ne respecte les contraintes, le programme l'indique (statu
 pytest
 ```
 
+## Meilleurs builds d'une classe (dégâts des sorts)
+
+```bash
+python3 -m src.build feca --exo pa pm --max-exo 2
+```
+
+Pour chaque élément des sorts de la classe (et en multi-élément), le programme cherche le stuff qui maximise les dégâts d'un tour de jeu : rotation des sorts de dégâts disponibles au niveau du personnage, dans la limite des PA et des lancers par tour. Il affiche le classement des builds puis, pour chacun, l'équipement, les exos, les panoplies, la répartition des points de caractéristiques, les stats et les dégâts de chaque sort (normal, critique, espérance).
+
+* Formule utilisée (jet moyen) : `base × (100 + caractéristique + puissance) / 100 + dommages + dommages élémentaires` (+ dommages critiques en critique), multiplié par les % de dommages aux sorts et de distance ou de mêlée ; chance de critique = critique du sort + % critique. Résistances de la cible : fixes puis en pourcentage.
+* Les effets différés (poisons, glyphes, déclenchements) et les coups d'arme ne sont pas comptés.
+* Le problème n'étant pas linéaire (critique × caractéristiques), la recherche procède par linéarisations successives et évalue chaque stuff avec la formule exacte : c'est une heuristique, sans garantie d'optimalité.
+
+Options principales : `--niveau` (200), `--pa` (11), `--pm` (6), `--element terre feu eau air neutre multi`, `--exo`, `--max-exo`, `--parchemins` (100), `--sans-points`, `--profil degats|equilibre|tank` (ajoute la vitalité ou les résistances à l'objectif), `--cible aucune|robuste` (`robuste` maximise les dégâts contre la pire de quatre cibles résistantes à 30 % dans un élément), `--top k` et `--diversite d` (k builds différant d'au moins d items), `--json`.
+
 ## Caractéristiques disponibles
 
 Les caractéristiques peuvent être désignées par leur alias, leur nom (`Vitalité`), leur identifiant (`11`) ou leur nom de colonne (`characteristic_11`), dans `--weights`, `--base-stats` et `--min-stats`. La liste est aussi affichée par `--list-stats`.
