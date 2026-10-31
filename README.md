@@ -52,6 +52,13 @@ Cette commande recherche l'équipement optimal pour un personnage jusqu'au nivea
 * `--debug-pa-pm` : Affiche le détail des PA/PM (items, bonus de panoplie, base).
 * `--solver-log` : Affiche le journal du solveur.
 
+### Bonus de panoplie et conditions d'équipement
+
+* Un seul palier de bonus est actif par panoplie : celui qui correspond au nombre exact de pièces portées (les paliers ne se cumulent pas, les malus de palier sont imposés).
+* Les conditions d'équipement des items sont prises en compte : caractéristiques totales (`CS>399`, `CP<12|CM<6`…), caractéristiques de base (`Cs>99`, comparées à `--base-stats`) et nombre de bonus de panoplie actifs (`pk<2` : somme sur les panoplies de « pièces portées − 1 »). Les opérateurs ET (`&`), OU (`|`), les parenthèses et `!` (différent de) sont gérés.
+* Les conditions qui ne dépendent pas des caractéristiques (métier, quête, classe, alignement…) sont considérées comme remplies ; le rapport liste les items concernés « à vérifier en jeu ».
+* Le rapport vérifie indépendamment que les conditions des items retenus sont respectées par les stats finales.
+
 Si aucune combinaison ne respecte les contraintes, le programme l'indique (statut du solveur) et retourne un code d'erreur.
 
 ### 3. Tests
@@ -125,4 +132,4 @@ Le tableau suivant liste toutes les caractéristiques supportées ainsi que leur
 | 122                | Dommages d'armes      |
 | 123                | Dommages aux sorts    |
 
-Améliorations prévues : ajouter les bonus même quand inutile pour l'objectif (obligatoire d'avoir 2 si on a 3), ajouter les familiers/montures
+Améliorations prévues : ajouter les familiers/montures

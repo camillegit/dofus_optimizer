@@ -1,5 +1,4 @@
 import argparse
-import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -7,6 +6,11 @@ from pathlib import Path
 
 import pandas as pd
 from pulp import LpMaximize, LpProblem, LpStatus, LpVariable, PULP_CBC_CMD, lpSum
+
+try:
+    from . import conditions
+except ImportError:  # run as a script: python src/optimizer.py
+    import conditions
 
 DATA_PROCESSED_DIR = Path(__file__).resolve().parent.parent / 'data' / 'processed'
 
@@ -39,6 +43,7 @@ WEAPON_TYPES = [3, 7, 4, 2, 5, 6, 19, 22, 8]
 DOFUS_TROPHY_TYPES = [151, 23]
 RING_TYPE = 9
 DOFUS_TYPE = 23
+SHIELD_TYPE = 82
 
 BANNED_ITEMS = [2155, 8575, 27265, 27266, 27267, 27268, 27278, 27280, 27282, 27284, 9031, 2447, 6713]
 
@@ -126,11 +131,16 @@ class Model:
         """Number of active set bonuses as counted by the 'pk' condition: sum over sets of (pieces - 1)."""
         return lpSum((k - 1) * var for (_, k), var in self.bonus_vars.items())
 
-    def big_m(self, char):
-        total_abs = sum(abs(v) for v in self.item_stat(char).values())
-        total_abs += sum(abs(v) for v in self.bonus_stat(char).values())
-        total_abs += abs(self.base_stats.get(char, 0))
-        return max(100, total_abs + 100)
+    def stat_bounds(self, char):
+        """Lower/upper bounds of the total of a characteristic over all feasible stuffs."""
+        item_values = list(self.item_stat(char).values())
+        tiers = defaultdict(list)
+        for (set_id, _), value in self.bonus_stat(char).items():
+            tiers[set_id].append(value)
+        base = self.base_stats.get(char, 0)
+        low = base + sum(min(0, v) for v in item_values) + sum(min(0, *v) for v in tiers.values())
+        high = base + sum(max(0, v) for v in item_values) + sum(max(0, *v) for v in tiers.values())
+        return low, high
 
 
 def filter_items(items_df, opts):
@@ -155,6 +165,14 @@ def add_slot_constraints(model):
 
     weapons = items.index[items['type'].isin(WEAPON_TYPES)]
     problem += lpSum(model.item_vars[i] for i in weapons) <= 1, "Grouped_Types_Constraint"
+
+    # A shield cannot be worn with a two-handed weapon
+    if 'deux_mains' in items.columns:
+        two_handed = items.index[items['type'].isin(WEAPON_TYPES) & items['deux_mains'].astype(bool)]
+        shields = items.index[items['type'] == SHIELD_TYPE]
+        if len(two_handed) and len(shields):
+            problem += (lpSum(model.item_vars[i] for i in list(two_handed) + list(shields)) <= 1,
+                        "Shield_Two_Handed_Constraint")
 
     dofus_trophies = items.index[items['type'].isin(DOFUS_TROPHY_TYPES)]
     problem += lpSum(model.item_vars[i] for i in dofus_trophies) <= 6, "Dofus_Trophy_Combined_Constraint"
@@ -184,89 +202,99 @@ def add_min_stat_constraints(model, opts):
         model.problem += model.total_stat_expr(char) >= minimum, f"Minimum_{char}_Constraint"
 
 
-CONDITION_CODE_TO_CHAR = {
-    'W': 'characteristic_12', 'S': 'characteristic_10', 'C': 'characteristic_13',
-    'A': 'characteristic_14', 'I': 'characteristic_15', 'P': 'characteristic_1',
-    'M': 'characteristic_23', 'V': 'characteristic_11',
-}
-C_CONDITION_REGEX = re.compile(r'\b(C[A-Za-z0-9]*)\s*(<=|>=|=|<|>)\s*([0-9]+)\b')
-PK_CONDITION_REGEX = re.compile(r'\b(Pk)\s*(<=|>=|=|<|>)\s*([0-9]+)\b')
-STAT_COND_REGEX = re.compile(r'^C([A-Za-z0-9]+)(<=|>=|=|<|>)(\d+)$')
-PK_COND_REGEX = re.compile(r'^(Pk)(<=|>=|=|<|>)(\d+)$')
+class ConditionBuilder:
+    """Turns parsed conditions into binary indicators v such that v = 1 implies the condition holds.
 
+    An indicator is True/False when the data alone decides the condition. Conditions on jobs,
+    quests, class... are not modelled and are considered satisfied.
+    """
 
-def extract_conditions(condition_str):
-    if not isinstance(condition_str, str):
-        return []
-    normalized = condition_str.replace("|", "&")
-    c_matches = C_CONDITION_REGEX.findall(normalized)
-    pk_matches = PK_CONDITION_REGEX.findall(normalized)
-    return [f"{var}{op}{val}" for var, op, val in c_matches + pk_matches]
+    def __init__(self, model):
+        self.model = model
+        self.atoms = {}
+        self.count = 0
+
+    def new_var(self, kind):
+        self.count += 1
+        return LpVariable(f"cond_{kind}_{self.count}", cat='Binary')
+
+    def indicator(self, tree):
+        if tree is None:
+            return True
+        if tree[0] == 'atom':
+            return self.atom(*tree[1:])
+        return self.combine(tree[0], [self.indicator(child) for child in tree[1]])
+
+    def combine(self, kind, children):
+        neutral = kind == 'and'          # True is neutral for 'and', False for 'or'
+        if any(c is (not neutral) for c in children):
+            return not neutral
+        children = [c for c in children if c is not neutral]
+        if len(children) <= 1:
+            return children[0] if children else neutral
+        var = self.new_var(kind)
+        if kind == 'and':
+            for c in children:
+                self.model.problem += var <= c
+        else:
+            self.model.problem += var <= lpSum(children)
+        return var
+
+    def atom(self, code, op, value):
+        key = (code, op, value)
+        if key not in self.atoms:
+            self.atoms[key] = self.build_atom(code, op, value)
+        return self.atoms[key]
+
+    def build_atom(self, code, op, value):
+        kind = conditions.atom_kind(code)
+        if kind is None or op == '~':
+            return True
+        if kind == 'base':
+            return conditions.compare(self.model.base_stats.get(conditions.atom_char(code), 0), op, int(value))
+        if kind == 'set_bonus':
+            expr = self.model.set_bonus_count()
+            bounds = (0, sum(len(m) - 1 for m in self.model.set_members.values()))
+        else:
+            char = conditions.atom_char(code)
+            expr, bounds = self.model.total_stat_expr(char), self.model.stat_bounds(char)
+        return self.comparison(expr, bounds, op, int(value))
+
+    def comparison(self, expr, bounds, op, value):
+        """Indicator of `expr <op> value` for an integer-valued expression within bounds."""
+        if op in ('!', '!='):
+            return self.combine('or', [self.comparison(expr, bounds, '<', value),
+                                       self.comparison(expr, bounds, '>', value)])
+        if op == '=':
+            return self.combine('and', [self.comparison(expr, bounds, '>=', value),
+                                        self.comparison(expr, bounds, '<=', value)])
+        low, high = bounds
+        if op in ('>', '>='):
+            threshold = value + 1 if op == '>' else value
+            if low >= threshold:
+                return True
+            if high < threshold:
+                return False
+            var = self.new_var('ge')
+            self.model.problem += expr >= threshold - (threshold - low) * (1 - var)
+            return var
+        threshold = value - 1 if op == '<' else value
+        if high <= threshold:
+            return True
+        if low > threshold:
+            return False
+        var = self.new_var('le')
+        self.model.problem += expr <= threshold + (high - threshold) * (1 - var)
+        return var
 
 
 def add_condition_constraints(model):
-    problem = model.problem
-    condition_to_items = defaultdict(set)
-    for item_id, condition_str in model.items['condition'].items():
-        for cond in extract_conditions(condition_str):
-            condition_to_items[cond].add(item_id)
-
-    for idx, cond in enumerate(sorted(condition_to_items)):
-        stat_match = STAT_COND_REGEX.match(cond)
-        pk_match = PK_COND_REGEX.match(cond)
-        z = LpVariable(f"z_{idx}", cat='Binary')
-
-        if stat_match:
-            code, op, value_str = stat_match.groups()
-            char = CONDITION_CODE_TO_CHAR.get(code)
-            if char is None or char not in model.items.columns:
-                continue
-            value = int(value_str)
-            total = model.total_stat_expr(char)
-            M = model.big_m(char)
-            if op == '>':
-                problem += total >= value + 1 - M * (1 - z), f"Cond_{cond}_min"
-            elif op == '>=':
-                problem += total >= value - M * (1 - z), f"Cond_{cond}_min"
-            elif op == '<':
-                problem += total <= value - 1 + M * (1 - z), f"Cond_{cond}_max"
-            elif op == '<=':
-                problem += total <= value + M * (1 - z), f"Cond_{cond}_max"
-            elif op == '=':
-                problem += total >= value - M * (1 - z), f"Cond_{cond}_eq_min"
-                problem += total <= value + M * (1 - z), f"Cond_{cond}_eq_max"
-
-        elif pk_match:
-            _, op, value_str = pk_match.groups()
-            value = int(value_str)
-
-            def bonuses_ge(threshold):
-                keys = [key for key in model.bonus_vars if key[1] >= threshold]
-                return lpSum(model.bonus_vars[key] for key in keys), max(1, len(keys))
-
-            if op == '<':
-                total, M = bonuses_ge(value)
-                problem += total <= M * (1 - z), f"Cond_{cond}_max"
-            elif op == '<=':
-                total, M = bonuses_ge(value + 1)
-                problem += total <= M * (1 - z), f"Cond_{cond}_max"
-            elif op == '>':
-                total, M = bonuses_ge(value + 1)
-                problem += total >= 1 - M * (1 - z), f"Cond_{cond}_min"
-            elif op == '>=':
-                total, M = bonuses_ge(value)
-                problem += total >= 1 - M * (1 - z), f"Cond_{cond}_min"
-            elif op == '=':
-                total_lo, M_lo = bonuses_ge(value)
-                total_hi, M_hi = bonuses_ge(value + 1)
-                problem += total_lo >= 1 - M_lo * (1 - z), f"Cond_{cond}_eq_min"
-                problem += total_hi <= M_hi * (1 - z), f"Cond_{cond}_eq_max"
-        else:
+    builder = ConditionBuilder(model)
+    for item_id, text in model.items['condition'].items():
+        indicator = builder.indicator(conditions.parse(text))
+        if indicator is True:
             continue
-
-        members = [i for i in condition_to_items[cond] if i in model.item_vars]
-        if members:
-            problem += lpSum(model.item_vars[i] for i in members) <= z * len(members), f"Cond_{cond}_items"
+        model.problem += model.item_vars[item_id] <= (0 if indicator is False else indicator), f"Cond_item_{item_id}"
 
 
 def weighted_objective(model, weights):
@@ -340,6 +368,20 @@ def compute_stats(model, result, chars):
     return totals
 
 
+def set_bonus_count(result):
+    return sum(k - 1 for _, k in result.bonuses)
+
+
+def violated_conditions(model, result):
+    """Independent check: selected items whose condition does not hold on the final stats."""
+    totals = compute_stats(model, result, sorted(set(conditions.STAT_CODES.values())))
+    return [
+        item_id for item_id in result.items
+        if not conditions.evaluate(conditions.parse(model.items.at[item_id, 'condition']),
+                                   totals, model.base_stats, set_bonus_count(result))
+    ]
+
+
 def stat_name(char):
     return CHAR_ID_TO_NAME.get(int(char.split('_')[1]), char)
 
@@ -363,6 +405,18 @@ def print_report(model, result, opts, debug_pa_pm=False):
     print("\nStats totales:")
     for char, value in compute_stats(model, result, stats_to_display).items():
         print(f"- {stat_name(char)}: {value}")
+
+    print("\nConditions d'équipement:")
+    violated = violated_conditions(model, result)
+    if violated:
+        for item_id in violated:
+            print(f"- NON RESPECTÉE : {model.items.at[item_id, 'nom']} ({model.items.at[item_id, 'condition']})")
+    else:
+        print(f"- Conditions de caractéristiques respectées (bonus de panoplie actifs : {set_bonus_count(result)})")
+    for item_id in result.items:
+        atoms = conditions.unmodelled_atoms(conditions.parse(model.items.at[item_id, 'condition']))
+        if atoms:
+            print(f"- À vérifier en jeu : {model.items.at[item_id, 'nom']} ({', '.join(atoms)})")
 
     if debug_pa_pm:
         print("\nDebug PA/PM breakdown:")
