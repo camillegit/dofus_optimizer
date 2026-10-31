@@ -8,29 +8,12 @@ import pandas as pd
 from pulp import HiGHS, LpAffineExpression, LpMaximize, LpProblem, LpStatus, LpVariable, PULP_CBC_CMD, lpSum
 
 try:
-    from . import conditions
+    from . import characteristics, conditions
 except ImportError:  # run as a script: python src/optimizer.py
+    import characteristics
     import conditions
 
 DATA_PROCESSED_DIR = Path(__file__).resolve().parent.parent / 'data' / 'processed'
-
-CHAR_ID_TO_NAME = {
-    -1: "dommages Neutre", 10: "Force", 88: "Dommages Terre", 11: "Vitalité",
-    92: "Dommages Neutre", 15: "Intelligence", 78: "Fuite", 0: "Arme de chasse",
-    18: "% Critique", 14: "Agilité", 79: "Tacle", 23: "PM", 49: "Soins",
-    91: "Dommages Air", 12: "Sagesse", 13: "Chance", 48: "Prospection",
-    90: "Dommages Eau", 1: "PA", 44: "Initiative", 19: "Portée",
-    89: "Dommages Feu", 16: "Dommages", 25: "Puissance", 86: "Dommages Critiques",
-    87: "Résistances Critiques", 33: "% Résistance Terre", 26: "Invocations",
-    84: "Dommages Poussée", 37: "% Résistance Neutre", 82: "Retrait PA",
-    83: "Retrait PM", 34: "% Résistance Feu", 35: "% Résistance Eau",
-    36: "% Résistance Air", 58: "Résistances Neutre", 54: "Résistances Terre",
-    55: "Résistances Feu", 56: "Résistances Eau", 57: "Résistances Air",
-    28: "Esquive PM", 85: "Résistances Poussée", 40: "Pods", 27: "Esquive PA",
-    69: "Puissance Pièges", 70: "Dommages Pièges", 50: "Dommages Renvoyés",
-    124: "% Résistance mêlée", 121: "% Résistance distance",
-    122: "Dommages d'armes", 123: "Dommages aux sorts"
-}
 
 EQUIP_TYPES_MAP = {
     16: "Chapeau", 17: "Cape", 9: "Anneau", 1: "Amulette", 3: "Baguette",
@@ -62,22 +45,16 @@ def load_data(data_dir=DATA_PROCESSED_DIR):
 
 
 def parse_stat_list(raw_list):
-    """Parses ['characteristic_10:200', 'characteristic_13=100'] into a dict."""
+    """Parses ['force:200', 'vita=1.5', 'characteristic_13:100'] into {'characteristic_10': 200.0, ...}."""
     parsed = {}
     for raw in raw_list:
-        if ':' in raw:
-            key, value = raw.split(':', 1)
-        elif '=' in raw:
-            key, value = raw.split('=', 1)
-        else:
-            continue
-        key = key.strip()
-        if not key:
-            continue
+        key, sep, value = raw.replace('=', ':', 1).partition(':')
+        if not sep or not key.strip():
+            raise ValueError(f"Expected <characteristic>:<value>, got {raw!r}")
         try:
-            parsed[key] = float(value.strip())
-        except ValueError:
-            continue
+            parsed[characteristics.resolve(key)] = float(value.strip())
+        except ValueError as e:
+            raise ValueError(f"{e} in {raw!r}") from None
     return parsed
 
 
@@ -401,10 +378,6 @@ def violated_conditions(model, result):
     ]
 
 
-def stat_name(char):
-    return CHAR_ID_TO_NAME.get(int(char.split('_')[1]), char)
-
-
 def print_report(model, result, opts, debug_pa_pm=False):
     if result.status != 'Optimal':
         print(f"\nAucune solution trouvée (statut du solveur : {result.status}).")
@@ -423,7 +396,7 @@ def print_report(model, result, opts, debug_pa_pm=False):
     stats_to_display += [c for c in list(opts.weights) + list(model.base_stats) if c not in stats_to_display]
     print("\nStats totales:")
     for char, value in compute_stats(model, result, stats_to_display).items():
-        print(f"- {stat_name(char)}: {value}")
+        print(f"- {characteristics.display_name(char)}: {value}")
 
     print("\nConditions d'équipement:")
     violated = violated_conditions(model, result)
@@ -456,14 +429,20 @@ def parse_args(argv=None):
     parser.add_argument('--pa', type=int, default=9, help='Desired PA')
     parser.add_argument('--pm', type=int, default=4, help='Desired PM')
     parser.add_argument('--no-dofus', action='store_true', help='Exclude Dofus and Trophies')
-    parser.add_argument('--weights', nargs='+', default=[], help='List of characteristics and weights (e.g., characteristic_13:1.0)')
-    parser.add_argument('--base-stats', nargs='+', default=[], help='Base stats overrides (e.g., characteristic_1:7 characteristic_23:3)')
+    parser.add_argument('--weights', nargs='+', default=[], help='Characteristics and weights (e.g., force:1 vita:0.5 or characteristic_10:1)')
+    parser.add_argument('--base-stats', nargs='+', default=[], help='Base stats overrides (e.g., force:200 pa:7)')
     parser.add_argument('--debug-pa-pm', action='store_true', help='Print PA/PM contributions (items, set bonuses, base)')
-    parser.add_argument('--min-stats', nargs='+', default=[], help='Minimum stats constraints (e.g., characteristic_10:100 characteristic_13:300)')
+    parser.add_argument('--min-stats', nargs='+', default=[], help='Minimum stats constraints (e.g., force:100 chance:300)')
+    parser.add_argument('--list-stats', action='store_true', help='List characteristic ids and aliases, then exit')
     parser.add_argument('--classe', help="Character class (e.g. iop, 'Écaflip' or its id), for class-restricted items")
     parser.add_argument('--solver', choices=sorted(SOLVERS), default='cbc', help='MILP solver (highs requires: pip install highspy)')
     parser.add_argument('--solver-log', action='store_true', help='Show the solver log')
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    try:
+        args.options = options_from_args(args)
+    except ValueError as e:
+        parser.error(str(e))
+    return args
 
 
 def options_from_args(args):
@@ -477,7 +456,10 @@ def options_from_args(args):
 
 def main(argv=None):
     args = parse_args(argv)
-    opts = options_from_args(args)
+    opts = args.options
+    if args.list_stats:
+        print(characteristics.stats_table())
+        return 0
 
     print("Loading data...")
     items_df, bonuses_df = load_data()

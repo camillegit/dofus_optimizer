@@ -34,10 +34,10 @@ Pour trouver l'ensemble d'équipements optimal, exécutez le script `optimizer.p
 **Exemple :**
 
 ```bash
-python3 src/optimizer.py --max-level 100 --pa 10 --pm 5 --weights characteristic_10:1.0 characteristic_11:0.5 --base-stats characteristic_10:200 characteristic_13:100 --min-stats characteristic_10:100 characteristic_13:300
+python3 src/optimizer.py --max-level 100 --pa 10 --pm 5 --weights force:1.0 vita:0.5 --base-stats force:200 chance:100 --min-stats force:100 chance:300
 ```
 
-Cette commande recherche l'équipement optimal pour un personnage jusqu'au niveau 100 avec 10 PA et 5 PM, en priorisant la Force (`characteristic_10`) et la Vitalité (`characteristic_11`) avec pondérations respectives.
+Cette commande recherche l'équipement optimal pour un personnage jusqu'au niveau 100 avec 10 PA et 5 PM, en priorisant la Force et la Vitalité avec pondérations respectives, avec au moins 100 de Force et 300 de Chance (stats de base comprises).
 
 **Arguments :**
 
@@ -46,10 +46,11 @@ Cette commande recherche l'équipement optimal pour un personnage jusqu'au nivea
 * `--pa` : PA (Points d'Action) souhaités (par défaut : 9)
 * `--pm` : PM (Points de Mouvement) souhaités (par défaut : 4)
 * `--no-dofus` : Exclut les Dofus et les Trophées de l'optimisation
-* `--weights` : Liste des caractéristiques et de leurs poids à optimiser. Par exemple, `characteristic_10:1.0` pour la Force avec un poids de 1.0.
-* `--base-stats` : Stats de base ajoutées au personnage (ex. `characteristic_10:200 characteristic_13:100`). Ces stats sont prises en compte pour les conditions et les totaux affichés.
-* `--min-stats` : Contraintes de stats minimales additionnelles (ex. `characteristic_10:100 characteristic_13:300`). PA/PM sont exclus ici, utilisez `--pa` et `--pm` pour cela.
+* `--weights` : Liste des caractéristiques et de leurs poids à optimiser. Par exemple, `force:1.0` (ou `characteristic_10:1.0`) pour la Force avec un poids de 1.0.
+* `--base-stats` : Stats de base ajoutées au personnage (ex. `force:200 chance:100`). Ces stats sont prises en compte pour les conditions et les totaux affichés.
+* `--min-stats` : Contraintes de stats minimales additionnelles (ex. `force:100 chance:300`). PA/PM sont exclus ici, utilisez `--pa` et `--pm` pour cela.
 * `--classe` : Classe du personnage (ex. `iop`, `Écaflip` ou son identifiant), pour les items réservés à une classe. Sans cette option, ces conditions sont considérées comme remplies.
+* `--list-stats` : Affiche la liste des caractéristiques et de leurs alias.
 * `--debug-pa-pm` : Affiche le détail des PA/PM (items, bonus de panoplie, base).
 * `--solver` : Solveur MILP, `cbc` (par défaut, fourni avec PuLP) ou `highs` (nécessite `pip install highspy`). Sur ce modèle CBC est le plus rapide (< 1 s par scénario).
 * `--solver-log` : Affiche le journal du solveur.
@@ -71,67 +72,63 @@ pytest
 
 ## Caractéristiques disponibles
 
-Le tableau suivant liste toutes les caractéristiques supportées ainsi que leurs identifiants internes. Ces identifiants sont utilisés lors de la définition des poids d'optimisation (ex. `characteristic_10`).
+Les caractéristiques peuvent être désignées par leur alias, leur nom (`Vitalité`), leur identifiant (`11`) ou leur nom de colonne (`characteristic_11`), dans `--weights`, `--base-stats` et `--min-stats`. La liste est aussi affichée par `--list-stats`.
 
-| ID caractéristique | Nom                   |
-| ------------------ | --------------------- |
-| -1                 | dommages Neutre       |
-| 10                 | Force                 |
-| 88                 | Dommages Terre        |
-| 11                 | Vitalité              |
-| 92                 | Dommages Neutre       |
-| 15                 | Intelligence          |
-| 78                 | Fuite                 |
-| 0                  | Arme de chasse        |
-| 18                 | % Critique            |
-| 14                 | Agilité               |
-| 79                 | Tacle                 |
-| 23                 | PM                    |
-| 49                 | Soins                 |
-| 91                 | Dommages Air          |
-| 12                 | Sagesse               |
-| 13                 | Chance                |
-| 48                 | Prospection           |
-| 90                 | Dommages Eau          |
-| 1                  | PA                    |
-| 44                 | Initiative            |
-| 19                 | Portée                |
-| 89                 | Dommages Feu          |
-| 16                 | Dommages              |
-| 25                 | Puissance             |
-| 86                 | Dommages Critiques    |
-| 87                 | Résistances Critiques |
-| 33                 | % Résistance Terre    |
-| 26                 | Invocations           |
-| 29                 |                       |
-| 84                 | Dommages Poussée      |
-| 37                 | % Résistance Neutre   |
-| 82                 | Retrait PA            |
-| 83                 | Retrait PM            |
-| 34                 | % Résistance Feu      |
-| 35                 | % Résistance Eau      |
-| 36                 | % Résistance Air      |
-| 58                 | Résistances Neutre    |
-| 54                 | Résistances Terre     |
-| 55                 | Résistances Feu       |
-| 56                 | Résistances Eau       |
-| 57                 | Résistances Air       |
-| 28                 | Esquive PM            |
-| 85                 | Résistances Poussée   |
-| 40                 | Pods                  |
-| 38                 |                       |
-| 81                 |                       |
-| 27                 | Esquive PA            |
-| 69                 | Puissance Pièges      |
-| 70                 | Dommages Pièges       |
-| 50                 | Dommages Renvoyés     |
-| 80                 |                       |
-| 140                |                       |
-| 124                | % Résistance mêlée    |
-| 121                | % Résistance distance |
-| 125                |                       |
-| 120                |                       |
-| 122                | Dommages d'armes      |
-| 123                | Dommages aux sorts    |
+| ID | Alias | Nom |
+| --- | --- | --- |
+| -1 | `inconnue` | Inconnue |
+| 0 | `vie` | Points de vie |
+| 1 | `pa` | PA |
+| 10 | `force` | Force |
+| 11 | `vitalite`, `vita` | Vitalité |
+| 12 | `sagesse`, `sage` | Sagesse |
+| 13 | `chance` | Chance |
+| 14 | `agilite`, `agi` | Agilité |
+| 15 | `intelligence`, `intel` | Intelligence |
+| 16 | `dommages`, `do` | Dommages |
+| 18 | `critique`, `crit` | % Critique |
+| 19 | `portee`, `po` | Portée |
+| 23 | `pm` | PM |
+| 25 | `puissance`, `pui` | Puissance |
+| 26 | `invocations`, `invo` | Invocations |
+| 27 | `esquive_pa` | Esquive PA |
+| 28 | `esquive_pm` | Esquive PM |
+| 33 | `res_terre_pct` | % Résistance Terre |
+| 34 | `res_feu_pct` | % Résistance Feu |
+| 35 | `res_eau_pct` | % Résistance Eau |
+| 36 | `res_air_pct` | % Résistance Air |
+| 37 | `res_neutre_pct` | % Résistance Neutre |
+| 40 | `pods` | Pods |
+| 44 | `initiative`, `ini` | Initiative |
+| 48 | `prospection`, `prospe` | Prospection |
+| 49 | `soins` | Soins |
+| 50 | `renvoi` | Dommages renvoyés |
+| 54 | `res_terre` | Résistance Terre |
+| 55 | `res_feu` | Résistance Feu |
+| 56 | `res_eau` | Résistance Eau |
+| 57 | `res_air` | Résistance Air |
+| 58 | `res_neutre` | Résistance Neutre |
+| 69 | `puissance_pieges` | Puissance Pièges |
+| 70 | `dommages_pieges` | Dommages Pièges |
+| 78 | `fuite` | Fuite |
+| 79 | `tacle` | Tacle |
+| 82 | `retrait_pa` | Retrait PA |
+| 83 | `retrait_pm` | Retrait PM |
+| 84 | `dommages_poussee` | Dommages Poussée |
+| 85 | `res_poussee` | Résistance Poussée |
+| 86 | `dommages_critiques`, `docri` | Dommages Critiques |
+| 87 | `res_critiques` | Résistance Critiques |
+| 88 | `dommages_terre` | Dommages Terre |
+| 89 | `dommages_feu` | Dommages Feu |
+| 90 | `dommages_eau` | Dommages Eau |
+| 91 | `dommages_air` | Dommages Air |
+| 92 | `dommages_neutre` | Dommages Neutre |
+| 120 | `dommages_distance_pct` | % Dommages distance |
+| 121 | `res_distance_pct` | % Résistance distance |
+| 122 | `dommages_armes_pct` | % Dommages d'armes |
+| 123 | `dommages_sorts_pct` | % Dommages aux sorts |
+| 124 | `res_melee_pct` | % Résistance mêlée |
+| 125 | `dommages_melee_pct` | % Dommages mêlée |
+| 140 | `taille` | Taille (%) |
 
 Améliorations prévues : ajouter les familiers/montures

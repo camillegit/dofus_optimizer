@@ -1,5 +1,6 @@
 import pytest
 
+from src.characteristics import resolve
 from src.optimizer import compute_stats, load_data, parse_stat_list
 from tests.helpers import make_items, optimize
 
@@ -7,8 +8,16 @@ FORCE, PA = 'characteristic_10', 'characteristic_1'
 
 
 def test_parse_stat_list():
-    assert parse_stat_list(['characteristic_10:200', 'characteristic_13=1.5', 'bad', ':3']) == {
-        'characteristic_10': 200.0, 'characteristic_13': 1.5}
+    assert parse_stat_list(['characteristic_10:200', 'chance=1.5', 'Vitalité:2', 'vita:3', 'pa:1']) == {
+        FORCE: 200.0, 'characteristic_13': 1.5, 'characteristic_11': 3.0, PA: 1.0}
+    for bad in (['bad'], [':3'], ['forse:1'], ['force:x']):
+        with pytest.raises(ValueError):
+            parse_stat_list(bad)
+
+
+def test_resolve_characteristics():
+    assert resolve('Agilité') == resolve('agi') == resolve('14') == resolve('characteristic_14') == 'characteristic_14'
+    assert resolve('% Critique') == resolve('crit') == 'characteristic_18'
 
 
 def test_slot_limits():

@@ -1,9 +1,6 @@
 requests
 pandas
-numpy
 pyarrow
 tqdm
-tabulate
-openpyxl
-click
-pulppytest
+pulp>=2.7,<4
+pytest
