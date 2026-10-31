@@ -95,8 +95,9 @@ class Model:
     items: pd.DataFrame          # filtered items, indexed by id
     bonuses: pd.DataFrame        # panoplies, indexed by id
     item_vars: dict
-    bonus_vars: dict             # (set_id, k) -> var
+    bonus_vars: dict             # (set_id, k) -> 1 iff exactly k pieces of the set are worn (k >= 2)
     base_stats: dict
+    set_members: dict = field(default_factory=dict)   # set_id -> item ids
 
     def item_stat(self, char):
         if char not in self.items.columns:
@@ -104,7 +105,7 @@ class Model:
         return self.items[char].to_dict()
 
     def bonus_stat(self, char):
-        """(set_id, k) -> value of the bonus column for that tier."""
+        """(set_id, k) -> cumulative bonus of that tier (tiers are exclusive, not additive)."""
         values = {}
         for (set_id, k) in self.bonus_vars:
             col = f"bonus_{k}_{char}"
@@ -120,6 +121,10 @@ class Model:
             + lpSum(var * bonus_stat.get(key, 0) for key, var in self.bonus_vars.items())
             + self.base_stats.get(char, 0)
         )
+
+    def set_bonus_count(self):
+        """Number of active set bonuses as counted by the 'pk' condition: sum over sets of (pieces - 1)."""
+        return lpSum((k - 1) * var for (_, k), var in self.bonus_vars.items())
 
     def big_m(self, char):
         total_abs = sum(abs(v) for v in self.item_stat(char).values())
@@ -156,9 +161,18 @@ def add_slot_constraints(model):
 
 
 def add_set_bonus_constraints(model):
+    """Exactly one tier y[s,k] (k = 0..n) is active per set and k equals the number of pieces worn."""
+    tiers = defaultdict(dict)
     for (set_id, k), var in model.bonus_vars.items():
-        members = model.items.index[model.items['pano'] == set_id]
-        model.problem += var <= lpSum(model.item_vars[i] for i in members) / k, f"Bonus_{set_id}_{k}_Constraint"
+        tiers[set_id][k] = var
+    for set_id, members in model.set_members.items():
+        low = {k: LpVariable(f"bonus_{set_id}_{k}", cat='Binary') for k in (0, 1)}
+        set_tiers = {**low, **tiers[set_id]}
+        model.problem += lpSum(set_tiers.values()) == 1, f"Bonus_{set_id}_One_Tier"
+        model.problem += (
+            lpSum(k * var for k, var in set_tiers.items()) == lpSum(model.item_vars[i] for i in members),
+            f"Bonus_{set_id}_Pieces"
+        )
 
 
 def add_min_stat_constraints(model, opts):
@@ -266,12 +280,12 @@ def build_model(items_df, bonuses_df, opts):
 
     item_vars = {i: LpVariable(f"item_{i}", cat='Binary') for i in items.index}
 
-    bonus_vars = {}
-    set_sizes = items[items['pano'] != -1].groupby('pano').size()
-    for set_id, count in set_sizes.items():
-        if set_id not in bonuses.index:
+    bonus_vars, set_members = {}, {}
+    for set_id, members in items[items['pano'] > 0].groupby('pano').groups.items():
+        if set_id not in bonuses.index or len(members) < 2:
             continue
-        for k in range(2, count + 1):
+        set_members[set_id] = list(members)
+        for k in range(2, len(members) + 1):
             bonus_vars[set_id, k] = LpVariable(f"bonus_{set_id}_{k}", cat='Binary')
 
     base_stats = dict(opts.base_stats)
@@ -279,7 +293,7 @@ def build_model(items_df, bonuses_df, opts):
     base_stats.setdefault(PM, 3)
 
     model = Model(LpProblem("Optimal_Stuff_Combination", LpMaximize), items, bonuses,
-                  item_vars, bonus_vars, base_stats)
+                  item_vars, bonus_vars, base_stats, set_members)
     add_slot_constraints(model)
     add_set_bonus_constraints(model)
     add_min_stat_constraints(model, opts)

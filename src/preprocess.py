@@ -27,7 +27,7 @@ def preprocess_items():
 
 def preprocess_panos():
     """
-    This function preprocesses the panos data by calculating incremental bonuses.
+    This function preprocesses the panos data (cumulative bonus per number of pieces worn).
     """
     processed_panos_path = PROCESSED_DIR / "dofus_panos_processed.parquet"
 
@@ -43,34 +43,8 @@ def preprocess_panos():
     # Replace void (NaN) values with 0
     df.fillna(0, inplace=True)
 
-    # Identify all columns related to bonuses
-    bonus_columns = [col for col in df.columns if 'bonus' in col]
-
-    # Parse the bonus columns to understand the structure
-    bonus_structure = {}
-    for col in bonus_columns:
-        parts = col.split('_')
-        item_count = int(parts[1])  # Extract the number of items (e.g., '2' or '3')
-        characteristic = '_'.join(parts[2:])  # Extract the characteristic (e.g., 'characteristic_10')
-
-        if characteristic not in bonus_structure:
-            bonus_structure[characteristic] = []
-        bonus_structure[characteristic].append((item_count, col))
-
-    # Sort the bonuses for each characteristic by the number of items
-    for characteristic, bonuses in bonus_structure.items():
-        bonus_structure[characteristic] = sorted(bonuses, key=lambda x: x[0])
-
-    # Compute the incremental bonuses
-    for characteristic, bonuses in bonus_structure.items():
-        for i in range(1, len(bonuses)):  # Start from the second item (incremental calculation)
-            current_item_count, current_col = bonuses[i]
-            
-            # Sum all the previous bonuses
-            previous_sum = sum(df[bonuses[j][1]] for j in range(i))
-            
-            # Subtract the cumulative previous bonus sum from the current bonus
-            df[current_col] = df[current_col] - previous_sum
+    # Bonus columns keep the cumulative value of each tier (bonus_<k>_characteristic_<c>):
+    # in game, the k-pieces tier replaces the lower ones.
 
     df.to_parquet(processed_panos_path, index=False)
     print(f"Processed panos saved to: {processed_panos_path}")
