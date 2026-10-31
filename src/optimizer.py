@@ -36,6 +36,8 @@ PA, PM = 'characteristic_1', 'characteristic_23'
 PRIMARY_STATS = ['characteristic_10', 'characteristic_15', 'characteristic_13', 'characteristic_14',
                  'characteristic_11', 'characteristic_12']
 POINTS_PER_LEVEL = 5
+# Item types that can receive an exotic rune ("exo"): hat, cape, amulet, ring, belt, boots and weapons
+EXO_TYPES = [16, 17, 1, 9, 10, 11] + WEAPON_TYPES
 
 
 def load_data(data_dir=DATA_PROCESSED_DIR):
@@ -78,6 +80,8 @@ class Options:
     breed: int = None            # character class (DofusDB breed id), for PG conditions
     points: bool = False         # allocate characteristic points (requires breed)
     scrolls: int = 0             # characteristic scrolls ("parchemins") in each primary stat
+    exos: list = field(default_factory=list)   # characteristics allowed as exo (+1), e.g. [PA, PM]
+    max_exos: int = None         # maximum number of exos over the whole stuff
 
 
 @dataclass
@@ -94,6 +98,7 @@ class Model:
     extra_terms: dict = field(default_factory=lambda: defaultdict(list))
     extra_bounds: dict = field(default_factory=lambda: defaultdict(lambda: (0, 0)))
     point_terms: dict = field(default_factory=lambda: defaultdict(list))   # part of the base characteristic
+    exo_vars: dict = field(default_factory=dict)  # (item id, char) -> binary
     _cache: dict = field(default_factory=dict, repr=False)
 
     def add_extra(self, char, var, coef, low, high, base=False):
@@ -358,6 +363,27 @@ def add_characteristic_points(model, opts):
     model.problem += LpAffineExpression(spent) <= total, "Characteristic_Points"
 
 
+def add_exos(model, opts):
+    """Exotic runes: +1 in a characteristic the item does not have, at most one per worn item."""
+    if not opts.exos:
+        return
+    candidates = model.items.index[model.items['type'].isin(EXO_TYPES)]
+    for item_id in candidates:
+        item_exos = []
+        for char in opts.exos:
+            native = model.items.at[item_id, char] if char in model.items.columns else 0
+            if native != 0:
+                continue
+            var = LpVariable(f"exo_{item_id}_{char}", cat='Binary')
+            model.exo_vars[item_id, char] = var
+            model.add_extra(char, var, 1, 0, 1)
+            item_exos.append(var)
+        if item_exos:
+            model.problem += lpSum(item_exos) <= model.item_vars[item_id], f"Exo_{item_id}"
+    if opts.max_exos is not None:
+        model.problem += lpSum(model.exo_vars.values()) <= opts.max_exos, "Max_Exos"
+
+
 def weighted_objective(model, weights):
     return lpSum(model.total_stat_expr(char) * w for char, w in weights.items()) \
         - sum(model.base_stats.get(char, 0) * w for char, w in weights.items())
@@ -387,6 +413,7 @@ def build_model(items_df, bonuses_df, opts):
     model = Model(LpProblem("Optimal_Stuff_Combination", LpMaximize), items, bonuses,
                   item_vars, bonus_vars, base_stats, set_members, opts.breed)
     add_characteristic_points(model, opts)
+    add_exos(model, opts)
     add_slot_constraints(model)
     add_set_bonus_constraints(model)
     add_min_stat_constraints(model, opts)
@@ -404,6 +431,7 @@ class Result:
     objective: float = None
     extras: dict = field(default_factory=dict)      # char -> value of the extra contributions
     points: dict = field(default_factory=dict)      # char -> characteristic points invested
+    exos: list = field(default_factory=list)        # (item id, char)
 
 
 def selected(var):
@@ -422,6 +450,7 @@ def solve(model, msg=False, solver='cbc'):
     result = Result(status, objective=model.problem.objective.value())
     result.items = [i for i, var in model.item_vars.items() if selected(var)]
     result.bonuses = [key for key, var in model.bonus_vars.items() if selected(var)]
+    result.exos = [key for key, var in model.exo_vars.items() if selected(var)]
     for char, terms in model.extra_terms.items():
         result.extras[char] = round(sum(coef * (var.value() or 0) for var, coef in terms))
     for char, terms in model.point_terms.items():
@@ -471,6 +500,11 @@ def print_report(model, result, opts, debug_pa_pm=False):
     for item_id in result.items:
         item = model.items.loc[item_id]
         print(f"- Item ID: {item_id}, Nom: {item['nom']}, Type: {EQUIP_TYPES_MAP.get(item['type'], 'Unknown Type')}")
+
+    if result.exos:
+        print("\nExos:")
+        for item_id, char in result.exos:
+            print(f"- {model.items.at[item_id, 'nom']} : +1 {characteristics.display_name(char)}")
 
     print("\nBonus panoplies:")
     for set_id, k in result.bonuses:
@@ -529,6 +563,8 @@ def parse_args(argv=None):
     parser.add_argument('--classe', help="Character class (e.g. iop, 'Écaflip' or its id), for class-restricted items")
     parser.add_argument('--points', action='store_true', help='Optimize the characteristic points allocation (requires --classe)')
     parser.add_argument('--parchemins', type=int, default=0, help='Characteristic scrolls in each primary stat (e.g. 100)')
+    parser.add_argument('--exo', nargs='+', default=[], help='Characteristics allowed as exo (+1), e.g. pa pm po')
+    parser.add_argument('--max-exo', type=int, help='Maximum number of exos')
     parser.add_argument('--solver', choices=sorted(SOLVERS), default='cbc', help='MILP solver (highs requires: pip install highspy)')
     parser.add_argument('--solver-log', action='store_true', help='Show the solver log')
     args = parser.parse_args(argv)
@@ -546,6 +582,7 @@ def options_from_args(args):
         base_stats=parse_stat_list(args.base_stats), min_stats=parse_stat_list(args.min_stats),
         breed=conditions.class_id(args.classe) if args.classe else None,
         points=args.points, scrolls=args.parchemins,
+        exos=[characteristics.resolve(c) for c in args.exo], max_exos=args.max_exo,
     )
 
 

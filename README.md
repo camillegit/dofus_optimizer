@@ -56,6 +56,8 @@ Cette commande recherche l'équipement optimal pour un personnage jusqu'au nivea
 * `--debug-pa-pm` : Affiche le détail des PA/PM (items, bonus de panoplie, base).
 * `--points` : Répartit aussi les points de caractéristiques (5 par niveau, `--max-level` étant le niveau du personnage) selon les paliers de coût de la classe (nécessite `--classe`).
 * `--parchemins` : Parchemins de caractéristiques dans chaque caractéristique principale (ex. `100`).
+* `--exo` : Caractéristiques autorisées en exo (+1), ex. `pa pm po`. Un exo au plus par item, sur un item qui n'a pas déjà la caractéristique (chapeau, cape, amulette, anneaux, ceinture, bottes, arme).
+* `--max-exo` : Nombre maximal d'exos sur l'ensemble du stuff.
 * `--solver` : Solveur MILP, `cbc` (par défaut, fourni avec PuLP) ou `highs` (nécessite `pip install highspy`). Sur ce modèle CBC est le plus rapide (< 1 s par scénario).
 * `--solver-log` : Affiche le journal du solveur.
 
